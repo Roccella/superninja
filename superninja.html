@@ -134,8 +134,8 @@
                 dashMeleeUsed: false,
                 isChargingMelee: false,
                 meleeChargeTime: 0,
-                meleeChargeMax: 55, // Reduced from 80 for faster charging
-                baseMeleeChargeMax: 55,
+                meleeChargeMax: 45, // Sweet spot between tap rhythm and charged power
+                baseMeleeChargeMax: 45,
                 chargeReady: false,
                 movementPause: 0,
                 isHurt: false,
@@ -183,7 +183,7 @@
             witchTimeCharge: {
                 charge: 0,
                 maxCharge: 100,
-                chargePerHit: 10, // Charge gained per enemy hit (10 hits to fill)
+                chargePerHit: 5, // Charge gained per enemy hit (20 hits to fill)
                 ready: false,
                 canCharge: true // Can only charge when witch time is not active
             },
@@ -221,10 +221,10 @@
         const chargedDashCone = { angle: Math.PI * 0.6, range: 240, damage: 4 };
 
         const enemyAttack = {
-            chargeTime: 80,
-            blinkTime: 40,
-            blinkDuration: 12,
-            parryWindow: 40,
+            chargeTime: 53, // 2/3 of original 80
+            blinkTime: 48, // 90% of chargeTime - yellow until here, then red
+            blinkDuration: 8,
+            parryWindow: 53, // Can parry anytime during charge
             damage: 1,
             range: 35,
             arc: Math.PI * 0.7,
@@ -233,10 +233,10 @@
         };
 
         const bossAttack = {
-            chargeTime: 100,
-            blinkTime: 50,
-            blinkDuration: 15,
-            parryWindow: 50,
+            chargeTime: 67, // 2/3 of original 100
+            blinkTime: 60, // 90% of chargeTime - yellow until here, then red
+            blinkDuration: 10,
+            parryWindow: 67, // Can parry anytime during charge
             damage: 2,
             range: 50,
             arc: Math.PI * 0.8,
@@ -340,28 +340,43 @@
                 return;
             }
             
-            // Find closest enemy
-            let closest = null;
-            let closestDist = Infinity;
+            // Find enemy at medium-long range for shooting (not closest, not farthest)
+            // Prioritize enemies between 200-600 pixels away
+            let bestTarget = null;
+            let bestScore = Infinity;
             game.enemies.forEach(enemy => {
                 if (enemy.health <= 0 || enemy.dead) return;
                 const dx = enemy.x - player.x;
                 const dy = enemy.y - player.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < closestDist) {
-                    closestDist = dist;
-                    closest = enemy;
+                
+                // Scoring: prefer enemies at medium-long range (200-600px)
+                // Closer than 200: less priority
+                // 200-600: ideal range
+                // Beyond 600: prefer closer ones
+                let score;
+                if (dist < 200) {
+                    score = 200 - dist; // Lower priority for very close enemies
+                } else if (dist <= 600) {
+                    score = dist - 200; // Prefer further targets in this range
+                } else {
+                    score = 400 + (dist - 600); // Deprioritize very far enemies
+                }
+                
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestTarget = enemy;
                 }
             });
             
-            if (closest) {
+            if (bestTarget) {
                 // Lock onto new target
-                if (closest !== player.autoAimTarget) {
-                    player.autoAimTarget = closest;
+                if (bestTarget !== player.autoAimTarget) {
+                    player.autoAimTarget = bestTarget;
                     player.autoAimLockTimer = 30; // Lock for 0.5 seconds
                 }
-                const dx = closest.x - player.x;
-                const dy = closest.y - player.y;
+                const dx = bestTarget.x - player.x;
+                const dy = bestTarget.y - player.y;
                 player.angle = Math.atan2(dy, dx);
             }
         }
@@ -534,14 +549,26 @@
             // Award XP for kills
             if (mainDies) {
                 mainEnemy.dead = true;
-                mainEnemy.respawnTimer = 200 + Math.random() * 100;
-                if (mainEnemy.type === ENEMY_BOSS) game.bossActive = false;
+                // Longer respawn times, bosses take even longer
+                if (mainEnemy.type === ENEMY_BOSS) {
+                    mainEnemy.respawnTimer = 400 + Math.random() * 200;
+                    game.bossActive = false;
+                } else {
+                    mainEnemy.respawnTimer = 200 + Math.random() * 150;
+                }
+                if (mainEnemy.type === ENEMY_BOSS && !mainEnemy.respawnTimer) game.bossActive = false;
                 addXP(mainEnemy.type);
             }
             nearbyEnemies.forEach(e => {
                 e.dead = true;
-                e.respawnTimer = 200 + Math.random() * 100;
-                if (e.type === ENEMY_BOSS) game.bossActive = false;
+                // Longer respawn times, bosses take even longer
+                if (e.type === ENEMY_BOSS) {
+                    e.respawnTimer = 400 + Math.random() * 200;
+                    game.bossActive = false;
+                } else {
+                    e.respawnTimer = 200 + Math.random() * 150;
+                }
+                if (e.type === ENEMY_BOSS && !e.respawnTimer) game.bossActive = false;
                 addXP(e.type);
             });
         }
@@ -674,9 +701,19 @@
 
         function killEnemy(enemy, playerX, playerY, useSlashEffect = true) {
             enemy.dead = true;
-            enemy.respawnTimer = 120 + Math.random() * 120;
-            if (enemy.type === ENEMY_BOSS) game.bossActive = false;
+            // Longer respawn times, bosses take even longer
+            if (enemy.type === ENEMY_BOSS) {
+                enemy.respawnTimer = 400 + Math.random() * 200;
+                game.bossActive = false;
+            } else {
+                enemy.respawnTimer = 200 + Math.random() * 150;
+            }
             addXP(enemy.type);
+
+            // Restore witch time duration on kill
+            if (game.witchTime.active && !game.witchTime.circleWipe) {
+                game.witchTime.timer = Math.min(game.witchTime.maxTime, game.witchTime.timer + game.witchTime.killTimeBonus);
+            }
             if (useSlashEffect && game.slashDeaths.length < 15) {
                 // Radial slash lines pointing towards player (from enemy to player)
                 const slashAngle = Math.atan2(playerY - enemy.y, playerX - enemy.x);
@@ -807,7 +844,7 @@
             enemy.hasBlinked = false;
         }
 
-        function damagePlayer(fromX, fromY, isBossAttack = false) {
+        function damagePlayer(fromX, fromY, isBossAttack = false, isBigAttack = false) {
             const player = game.player;
             if (player.isParrying) return;
             player.isHurt = true;
@@ -820,6 +857,18 @@
                 player.vx = Math.cos(angle) * bossAttack.knockbackForce;
                 player.vy = Math.sin(angle) * bossAttack.knockbackForce;
                 game.screenShake = 15;
+                // Boss shockwave effect
+                spawnShockwave(fromX, fromY, '#ffaa00', 80);
+                spawnParticles(fromX, fromY, '#ffaa00', 20, 8);
+            } else if (isBigAttack) {
+                player.isKnockedBack = true;
+                player.knockbackTimer = 25; // Shorter than boss
+                player.vx = Math.cos(angle) * 15; // Less force than boss
+                player.vy = Math.sin(angle) * 15;
+                game.screenShake = 12;
+                // Big enemy shockwave effect
+                spawnShockwave(fromX, fromY, '#5a6fd6', 60);
+                spawnParticles(fromX, fromY, '#5a6fd6', 15, 6);
             } else {
                 player.vx = Math.cos(angle) * 8;
                 player.vy = Math.sin(angle) * 8;
@@ -1108,7 +1157,12 @@
             if (isEnemy) {
                 // Kill the enemy
                 target.dead = true;
-                target.respawnTimer = 200 + Math.random() * 100;
+                // Longer respawn times, bosses take even longer
+                if (target.type === ENEMY_BOSS) {
+                    target.respawnTimer = 400 + Math.random() * 200;
+                } else {
+                    target.respawnTimer = 200 + Math.random() * 150;
+                }
                 if (target.type === ENEMY_BOSS) game.bossActive = false;
                 addXP(target.type);
                 
@@ -1269,45 +1323,37 @@
             const attack = isCharged ? chargedMeleeAttack : meleeAttack;
             player.meleeFrame = attack.duration;
             player.meleeCooldown = attack.cooldown;
-            createSlashEffect(attack, player.angle, player.x, player.y, true, isCharged);
-            let hitSomething = false;
             
-            // Hit enemies
+            // Find closest enemy for melee targeting
+            let closestEnemy = null;
+            let closestDist = Infinity;
             game.enemies.forEach(enemy => {
                 if (enemy.health <= 0 || enemy.dead) return;
-                const result = checkArcHit(enemy, player.x, player.y, player.angle, attack.arc, attack.range, attack.damage, attack.knockback);
-                if (result.hit) {
-                    hitSomething = true;
-                    
-                    // During witch time, slice enemies in half instead of normal damage
-                    if (game.witchTime.active && !game.witchTime.circleWipe) {
-                        sliceEnemyOrPiece(enemy, player.angle, true);
-                    } else {
-                        spawnParticles(enemy.x, enemy.y, attack.color, isCharged ? 20 : 12, isCharged ? 10 : 6);
-                        if (enemy.health <= 0) killEnemy(enemy, player.x, player.y);
-                    }
+                const dx = enemy.x - player.x;
+                const dy = enemy.y - player.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestEnemy = enemy;
                 }
             });
             
-            // During witch time, also hit pieces
-            if (game.witchTime.active && !game.witchTime.circleWipe) {
-                enemyPieces.forEach(piece => {
-                    if (piece.health <= 0) return;
-                    const dx = piece.x - player.x;
-                    const dy = piece.y - player.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < attack.range + piece.size / 2) {
-                        let angleToP = Math.atan2(dy, dx);
-                        let angleDiff = angleToP - player.angle;
-                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                        if (Math.abs(angleDiff) < attack.arc / 2) {
-                            hitSomething = true;
-                            sliceEnemyOrPiece(piece, player.angle, false);
-                        }
-                    }
-                });
-            }
+            // Use closest enemy angle for melee, fallback to player.angle if no enemies
+            const meleeAngle = closestEnemy ? Math.atan2(closestEnemy.y - player.y, closestEnemy.x - player.x) : player.angle;
+            
+            createSlashEffect(attack, meleeAngle, player.x, player.y, true, isCharged);
+            let hitSomething = false;
+            
+            // Hit enemies - same behavior in and out of witch time
+            game.enemies.forEach(enemy => {
+                if (enemy.health <= 0 || enemy.dead) return;
+                const result = checkArcHit(enemy, player.x, player.y, meleeAngle, attack.arc, attack.range, attack.damage, attack.knockback);
+                if (result.hit) {
+                    hitSomething = true;
+                    spawnParticles(enemy.x, enemy.y, attack.color, isCharged ? 20 : 12, isCharged ? 10 : 6);
+                    if (enemy.health <= 0) killEnemy(enemy, player.x, player.y);
+                }
+            });
             
             if (hitSomething) { 
                 // Same freeze behavior in and out of witch time
@@ -1430,7 +1476,7 @@
             const angleToPlayer = Math.atan2(dy, dx);
             
             if (dist < attackConfig.range + player.radius + 50) {
-                damagePlayer(enemy.x, enemy.y, enemy.type === ENEMY_BOSS);
+                damagePlayer(enemy.x, enemy.y, enemy.type === ENEMY_BOSS, enemy.type === ENEMY_BIG);
             }
             
             createSlashEffect({
@@ -1718,23 +1764,22 @@
                 cycleWeapon();
             }
 
-            // Shoot: R2 (gamepad) or P (keyboard)
-            const r2Value = gamepad ? (gamepad.buttons[7]?.value || 0) : 0;
-            if ((r2Value > 0.5 || keys['KeyP']) && !slotMachine.active) shoot();
+            // Auto-fire (always shooting)
+            if (!slotMachine.active) shoot();
 
-            // Melee: R1 (gamepad) or O (keyboard) - only charge attacks, no thrusts
-            const r1Pressed = (gamepad && gamepad.buttons[5]?.pressed) || keys['KeyO'];
-            const r1JustReleased = (gamepad && buttonJustReleased(gamepad.buttons, 5)) || keysJustReleased['KeyO'];
-            
+            // Melee: R1 (gamepad) or K (keyboard) - only charge attacks, no thrusts
+            const r1Pressed = (gamepad && gamepad.buttons[5]?.pressed) || keys['KeyK'];
+            const r1JustReleased = (gamepad && buttonJustReleased(gamepad.buttons, 5)) || keysJustReleased['KeyK'];
+
             if (player.cantAttackTimer <= 0 && !player.isParrying && !player.isKnockedBack && !player.isGrounded) {
                 if (r1Pressed && !player.isDashing) {
                     startChargingMelee();
                 }
             }
             if (r1JustReleased) releaseMelee();
-            
-            // Dash: L1 (gamepad) or K (keyboard)
-            if ((gamepad && buttonJustPressed(gamepad.buttons, 4)) || keysJustPressed['KeyK']) dash();
+
+            // Dash: L1 (gamepad) or O (keyboard)
+            if ((gamepad && buttonJustPressed(gamepad.buttons, 4)) || keysJustPressed['KeyO']) dash();
 
             // Update gamepad button state
             if (gamepad) {
@@ -1850,12 +1895,15 @@
                     if (enemy.isCharging) {
                         enemy.chargeTime += enemyTime;
                         const attackConfig = enemy.type === ENEMY_BOSS ? bossAttack : enemyAttack;
-                        
+
+                        // Can parry anytime during charge (not just after blink)
+                        enemy.inParryWindow = true;
+
+                        // Track blink for visual effect only
                         if (enemy.chargeTime >= attackConfig.blinkTime && !enemy.hasBlinked) {
                             enemy.hasBlinked = true;
-                            enemy.inParryWindow = true;
                         }
-                        
+
                         if (enemy.chargeTime >= attackConfig.chargeTime) {
                             enemyAttackPlayer(enemy);
                         }
@@ -2292,24 +2340,19 @@
                     const chargePercent = enemy.chargeTime / attackConfig.chargeTime;
                     const maxBorderDist = 25;
                     const borderDist = maxBorderDist - (chargePercent * maxBorderDist);
-                    
-                    // Longer blink duration check
-                    const timeSinceBlink = enemy.chargeTime - attackConfig.blinkTime;
-                    const isBlinking = enemy.hasBlinked && timeSinceBlink < attackConfig.blinkDuration;
-                    
+
+                    // Yellow for 90% of charge, red only at the end as emphasis
                     let borderColor;
-                    if (!enemy.hasBlinked) {
-                        borderColor = '#ffcc00';
-                    } else if (isBlinking) {
-                        borderColor = '#ffffff';
+                    if (enemy.chargeTime < attackConfig.blinkTime) {
+                        borderColor = '#ffcc00'; // Yellow during most of charge
                     } else {
-                        borderColor = '#ff3333';
+                        borderColor = '#ff3333'; // Red only at the end
                     }
-                    
+
                     ctx.strokeStyle = borderColor;
                     ctx.lineWidth = 2;
                     ctx.globalAlpha = 0.6 + chargePercent * 0.3;
-                    
+
                     const size = enemy.size / 2 + borderDist;
                     ctx.beginPath();
                     ctx.arc(enemy.x, enemy.y, size, 0, Math.PI * 2);
