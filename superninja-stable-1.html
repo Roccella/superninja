@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Ninja Hyper Mega Ultra v37</title>
+    <title>Super Ninja Hyper Mega Ultra v36</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { 
@@ -12,50 +12,19 @@
             overflow: hidden;
             background: #1a1a2e; 
         }
-        #gameCanvas {
+        #gameCanvas { 
             display: block;
-            background: #0a0a14;
-        }
-        .game-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            width: 100%;
-            height: 100%;
+            background: #16213e;
         }
     </style>
 </head>
 <body>
-    <div class="game-container">
-        <canvas id="gameCanvas"></canvas>
-    </div>
+    <canvas id="gameCanvas"></canvas>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-
-        // Fixed viewport and game area dimensions
-        const VIEWPORT_WIDTH = 1200;
-        const VIEWPORT_HEIGHT = 800;
-        const GAME_AREA_WIDTH = 2000;  // ~16:10 ratio, approx double viewport
-        const GAME_AREA_HEIGHT = 1250;
-        const GAME_AREA_BORDER_COLOR = '#4ecca3';
-        const OUTSIDE_AREA_COLOR = '#0a0a14';
-        const GAME_AREA_COLOR = '#16213e';
-
-        // Camera system with deadzone (Hotline Miami style)
-        const camera = {
-            x: GAME_AREA_WIDTH / 2,
-            y: GAME_AREA_HEIGHT / 2,
-            deadzone: 40,  // Player can move this much before camera follows
-            smoothing: 0.08,  // How smoothly camera catches up (0-1, lower = smoother)
-            zoom: 1.0,        // Current zoom level (1.0 = normal, <1 = zoomed out)
-            targetZoom: 1.0,  // Target zoom to animate towards
-            zoomSmoothing: 0.06,  // How smoothly zoom transitions
-            normalZoom: 1.0,
-            witchTimeZoom: 1.2  // Zoom IN during witch time for dramatic effect
-        };
-
+        
         // Keyboard state
         const keys = {};
         let keysJustPressed = {};
@@ -82,44 +51,12 @@
         }
 
         function resizeCanvas() {
-            // Fixed viewport size
-            canvas.width = VIEWPORT_WIDTH;
-            canvas.height = VIEWPORT_HEIGHT;
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            if (game.player.x > canvas.width) game.player.x = canvas.width / 2;
+            if (game.player.y > canvas.height) game.player.y = canvas.height / 2;
         }
-
-        function updateCamera() {
-            const player = game.player;
-
-            // Calculate distance from camera center to player
-            const dx = player.x - camera.x;
-            const dy = player.y - camera.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-
-            // Only move camera if player is outside deadzone
-            if (dist > camera.deadzone) {
-                // Move camera towards player, but only the amount outside deadzone
-                const moveAmount = dist - camera.deadzone;
-                const angle = Math.atan2(dy, dx);
-
-                // Smooth camera movement
-                camera.x += Math.cos(angle) * moveAmount * camera.smoothing;
-                camera.y += Math.sin(angle) * moveAmount * camera.smoothing;
-            }
-
-            // Smooth zoom transition
-            if (Math.abs(camera.zoom - camera.targetZoom) > 0.001) {
-                camera.zoom += (camera.targetZoom - camera.zoom) * camera.zoomSmoothing;
-            } else {
-                camera.zoom = camera.targetZoom;
-            }
-        }
-
-        // Convert world coordinates to screen coordinates (accounting for zoom)
-        function worldToScreen(worldX, worldY) {
-            const zoomedX = (worldX - camera.x) * camera.zoom + VIEWPORT_WIDTH / 2;
-            const zoomedY = (worldY - camera.y) * camera.zoom + VIEWPORT_HEIGHT / 2;
-            return { x: zoomedX, y: zoomedY };
-        }
+        window.addEventListener('resize', resizeCanvas);
 
         // XP and Level system
         const xpSystem = {
@@ -167,15 +104,15 @@
         // Weapon system
         const weapons = {
             smg: { name: 'SMG', baseFireRate: 120, fireRate: 120, bulletSpeed: 14, baseDamage: 0.3, damage: 0.3, spread: 0.15, autoAim: 0.35, color: '#44ddff', bulletsPerShot: 1 },
-            // pistol: { name: 'PISTOL', baseFireRate: 300, fireRate: 300, bulletSpeed: 18, baseDamage: 1.2, damage: 1.2, spread: 0.05, autoAim: 0.4, color: '#ffff44', bulletsPerShot: 1 },
+            pistol: { name: 'PISTOL', baseFireRate: 300, fireRate: 300, bulletSpeed: 18, baseDamage: 1.2, damage: 1.2, spread: 0.05, autoAim: 0.4, color: '#ffff44', bulletsPerShot: 1 },
             shotgun: { name: 'SHOTGUN', baseFireRate: 500, fireRate: 500, bulletSpeed: 16, baseDamage: 0.6, damage: 0.6, spread: 0.3, autoAim: 0.25, color: '#ff8844', bulletsPerShot: 6 }
         };
-        const weaponOrder = ['smg', 'shotgun'];  // pistol disabled
+        const weaponOrder = ['smg', 'pistol', 'shotgun'];
         let currentWeaponIndex = 0;
 
         const game = {
             player: {
-                x: GAME_AREA_WIDTH / 2, y: GAME_AREA_HEIGHT / 2,
+                x: 600, y: 400,
                 vx: 0, vy: 0,
                 radius: 15,
                 angle: 0,
@@ -242,7 +179,6 @@
             parryCircle: null,
             parryFreeze: false,
             parryFreezeTimer: 0,
-            laserDeflect: null, // Boss laser deflect visual
             // Witch Time charge bar
             witchTimeCharge: {
                 charge: 0,
@@ -310,16 +246,6 @@
             attackPauseDuration: 80
         };
 
-        // Boss laser attack system
-        const bossLaser = {
-            detectionRange: VIEWPORT_HEIGHT * 0.5,  // 50% of viewport height
-            chargeTime: 90,      // Time to charge laser (1.5 sec)
-            aimDelay: 5,         // Frames of delay in aiming (small so walkable but dashable)
-            fireDuration: 15,    // How long the laser stays visible after firing
-            damage: 1,
-            deflectWindow: 8     // Frames where melee can deflect the laser
-        };
-
         const ENEMY_NORMAL = 'normal';
         const ENEMY_BIG = 'big';
         const ENEMY_BOSS = 'boss';
@@ -336,40 +262,12 @@
             
             const cfg = configs[type];
             const size = cfg.size;
-
-            // Calculate visible area bounds (camera view + margin)
-            const viewMargin = 50;  // Spawn just outside visible area
-            const viewLeft = camera.x - (VIEWPORT_WIDTH / 2) / camera.zoom - viewMargin;
-            const viewRight = camera.x + (VIEWPORT_WIDTH / 2) / camera.zoom + viewMargin;
-            const viewTop = camera.y - (VIEWPORT_HEIGHT / 2) / camera.zoom - viewMargin;
-            const viewBottom = camera.y + (VIEWPORT_HEIGHT / 2) / camera.zoom + viewMargin;
-
-            // Spawn from edges OUTSIDE camera view (clamped to game area)
+            
             switch(edge) {
-                case 0: // Top edge
-                    x = Math.random() * GAME_AREA_WIDTH;
-                    y = Math.min(-size, viewTop - size);
-                    vx = (Math.random() - 0.5) * cfg.baseSpeed;
-                    vy = cfg.baseSpeed;
-                    break;
-                case 1: // Right edge
-                    x = Math.max(GAME_AREA_WIDTH + size, viewRight + size);
-                    y = Math.random() * GAME_AREA_HEIGHT;
-                    vx = -cfg.baseSpeed;
-                    vy = (Math.random() - 0.5) * cfg.baseSpeed;
-                    break;
-                case 2: // Bottom edge
-                    x = Math.random() * GAME_AREA_WIDTH;
-                    y = Math.max(GAME_AREA_HEIGHT + size, viewBottom + size);
-                    vx = (Math.random() - 0.5) * cfg.baseSpeed;
-                    vy = -cfg.baseSpeed;
-                    break;
-                case 3: // Left edge
-                    x = Math.min(-size, viewLeft - size);
-                    y = Math.random() * GAME_AREA_HEIGHT;
-                    vx = cfg.baseSpeed;
-                    vy = (Math.random() - 0.5) * cfg.baseSpeed;
-                    break;
+                case 0: x = Math.random() * canvas.width; y = -size; vx = (Math.random() - 0.5) * cfg.baseSpeed; vy = cfg.baseSpeed; break;
+                case 1: x = canvas.width + size; y = Math.random() * canvas.height; vx = -cfg.baseSpeed; vy = (Math.random() - 0.5) * cfg.baseSpeed; break;
+                case 2: x = Math.random() * canvas.width; y = canvas.height + size; vx = (Math.random() - 0.5) * cfg.baseSpeed; vy = -cfg.baseSpeed; break;
+                case 3: x = -size; y = Math.random() * canvas.height; vx = cfg.baseSpeed; vy = (Math.random() - 0.5) * cfg.baseSpeed; break;
             }
             
             return {
@@ -399,14 +297,7 @@
                 attackPause: 0,
                 isStunned: false,
                 stunTimer: 0,
-                timeInAttackRange: 0, // New timer for attack delay
-                // Boss laser properties
-                laserCharging: false,
-                laserChargeTime: 0,
-                laserAimAngle: 0,      // Current aim angle (with delay)
-                laserTargetAngle: 0,   // Target angle (instant to player)
-                laserFiring: false,
-                laserFireTimer: 0
+                timeInAttackRange: 0 // New timer for attack delay
             };
         }
 
@@ -424,214 +315,6 @@
             if (game.bossActive) return;
             game.enemies.push(spawnEnemyFromEdge(ENEMY_BOSS));
             game.bossActive = true;
-        }
-
-        // Check if boss is visible on screen
-        function isBossOnScreen(boss) {
-            const viewHalfW = (VIEWPORT_WIDTH / 2) / camera.zoom;
-            const viewHalfH = (VIEWPORT_HEIGHT / 2) / camera.zoom;
-            const dx = boss.x - camera.x;
-            const dy = boss.y - camera.y;
-            return Math.abs(dx) < viewHalfW + boss.size && Math.abs(dy) < viewHalfH + boss.size;
-        }
-
-        // Update boss laser system
-        function updateBossLaser(enemy, distToPlayer, angleToPlayer, enemyTime) {
-            const player = game.player;
-            const inWitchTime = game.witchTime.active && !game.witchTime.circleWipe;
-
-            // Don't do laser during witch time
-            if (inWitchTime) {
-                enemy.laserCharging = false;
-                enemy.laserChargeTime = 0;
-                enemy.laserFiring = false;
-                return;
-            }
-
-            // Update firing state
-            if (enemy.laserFiring) {
-                enemy.laserFireTimer -= enemyTime;
-                if (enemy.laserFireTimer <= 0) {
-                    enemy.laserFiring = false;
-                }
-                return;
-            }
-
-            // Check if should start/continue targeting
-            const onScreen = isBossOnScreen(enemy);
-            const inRange = distToPlayer < bossLaser.detectionRange;
-
-            if (enemy.laserCharging) {
-                // Already charging - check if player left range
-                if (!inRange) {
-                    // Player escaped, cancel laser
-                    enemy.laserCharging = false;
-                    enemy.laserChargeTime = 0;
-                    return;
-                }
-
-                // Update aim with delay (smooth follow)
-                enemy.laserTargetAngle = angleToPlayer;
-                const aimDiff = enemy.laserTargetAngle - enemy.laserAimAngle;
-                let normalizedDiff = aimDiff;
-                while (normalizedDiff > Math.PI) normalizedDiff -= Math.PI * 2;
-                while (normalizedDiff < -Math.PI) normalizedDiff += Math.PI * 2;
-                // Aim catches up gradually - dashable but hard to walk away from
-                enemy.laserAimAngle += normalizedDiff * (1 / bossLaser.aimDelay) * enemyTime;
-
-                // Increment charge
-                enemy.laserChargeTime += enemyTime;
-
-                // Fire when charged
-                if (enemy.laserChargeTime >= bossLaser.chargeTime) {
-                    fireBossLaser(enemy);
-                }
-            } else {
-                // Not charging - check if should start
-                if (onScreen && inRange && !enemy.isCharging && enemy.attackCooldown <= 0) {
-                    // Start laser targeting
-                    enemy.laserCharging = true;
-                    enemy.laserChargeTime = 0;
-                    enemy.laserAimAngle = angleToPlayer;
-                    enemy.laserTargetAngle = angleToPlayer;
-                }
-            }
-        }
-
-        // Fire the boss laser
-        function fireBossLaser(enemy) {
-            const player = game.player;
-
-            enemy.laserCharging = false;
-            enemy.laserChargeTime = 0;
-            enemy.laserFiring = true;
-            enemy.laserFireTimer = bossLaser.fireDuration;
-            enemy.attackCooldown = 120; // Cooldown before next laser
-
-            // Spawn particles from boss
-            for (let i = 0; i < 8; i++) {
-                const angle = enemy.laserAimAngle + (Math.random() - 0.5) * 0.5;
-                const speed = 3 + Math.random() * 3;
-                game.particles.push({
-                    x: enemy.x,
-                    y: enemy.y,
-                    vx: Math.cos(angle) * speed,
-                    vy: Math.sin(angle) * speed,
-                    life: 20 + Math.random() * 15,
-                    maxLife: 35,
-                    radius: 3 + Math.random() * 2,
-                    color: '#ffff00'
-                });
-            }
-
-            // Check if player is hit by laser
-            // Use a wide line from boss toward aim direction
-            const laserLength = 1500;  // Long enough to reach across screen
-            const laserWidth = 20;
-
-            // Check collision with line
-            const laserEndX = enemy.x + Math.cos(enemy.laserAimAngle) * laserLength;
-            const laserEndY = enemy.y + Math.sin(enemy.laserAimAngle) * laserLength;
-
-            // Point-to-line distance
-            const playerDist = pointToLineDistance(player.x, player.y, enemy.x, enemy.y, laserEndX, laserEndY);
-
-            if (playerDist < laserWidth + player.radius) {
-                // Check if player is attacking (melee deflect)
-                if (player.meleeFrame > 0 && player.meleeFrame < 10) {
-                    // DEFLECT! Activate witch time
-                    deflectBossLaser(enemy);
-                } else if (!player.isDashing && !player.isHurt) {
-                    // Player hit by laser
-                    damagePlayer(enemy.x, enemy.y, true, false);
-                }
-            }
-
-            game.screenShake = 8;
-        }
-
-        // Deflect the boss laser - triggers witch time
-        function deflectBossLaser(enemy) {
-            const player = game.player;
-
-            // Find random visible enemy to redirect laser to
-            let targetEnemy = null;
-            const viewHalfW = (VIEWPORT_WIDTH / 2) / camera.zoom;
-            const viewHalfH = (VIEWPORT_HEIGHT / 2) / camera.zoom;
-
-            const visibleEnemies = game.enemies.filter(e => {
-                if (e === enemy || e.dead || e.health <= 0) return false;
-                const dx = e.x - camera.x;
-                const dy = e.y - camera.y;
-                return Math.abs(dx) < viewHalfW && Math.abs(dy) < viewHalfH;
-            });
-
-            if (visibleEnemies.length > 0) {
-                targetEnemy = visibleEnemies[Math.floor(Math.random() * visibleEnemies.length)];
-            }
-
-            // Store deflect info for visual
-            game.laserDeflect = {
-                fromX: enemy.x,
-                fromY: enemy.y,
-                bounceX: player.x,
-                bounceY: player.y,
-                toX: targetEnemy ? targetEnemy.x : player.x + Math.cos(player.angle) * 200,
-                toY: targetEnemy ? targetEnemy.y : player.y + Math.sin(player.angle) * 200,
-                timer: 30,
-                targetEnemy: targetEnemy
-            };
-
-            // Reset witch time bar and activate
-            game.witchTimeCharge.charge = 0;
-            game.witchTimeCharge.ready = false;
-
-            // Activate witch time
-            activateWitchTimeManual();
-
-            // Damage the target enemy if exists
-            if (targetEnemy) {
-                targetEnemy.health -= 3;
-                targetEnemy.hit = 15;
-                spawnParticles(targetEnemy.x, targetEnemy.y, '#ffff00', 15, 8);
-                if (targetEnemy.health <= 0) {
-                    killEnemy(targetEnemy, player.x, player.y, false);
-                }
-            }
-
-            // Big visual feedback
-            game.screenShake = 15;
-            spawnShockwave(player.x, player.y, '#ffffff', 100);
-            spawnParticles(player.x, player.y, '#ffff00', 20, 6);
-        }
-
-        // Helper: point to line distance
-        function pointToLineDistance(px, py, x1, y1, x2, y2) {
-            const A = px - x1;
-            const B = py - y1;
-            const C = x2 - x1;
-            const D = y2 - y1;
-
-            const dot = A * C + B * D;
-            const lenSq = C * C + D * D;
-            let param = -1;
-            if (lenSq !== 0) param = dot / lenSq;
-
-            let xx, yy;
-            if (param < 0) {
-                xx = x1;
-                yy = y1;
-            } else if (param > 1) {
-                xx = x2;
-                yy = y2;
-            } else {
-                xx = x1 + param * C;
-                yy = y1 + param * D;
-            }
-
-            const dx = px - xx;
-            const dy = py - yy;
-            return Math.sqrt(dx * dx + dy * dy);
         }
         
         function updateAutoAim() {
@@ -1327,16 +1010,12 @@
             game.witchTime.perfectClearTimer = 0;
             game.slowMotion = 0.15;
             game.violetFilter = 0.4;
-
-            // Zoom IN for dramatic effect
-            camera.targetZoom = camera.witchTimeZoom;
             
             // Circle wipe expanding FROM player (opening animation)
-            const maxDimension = Math.max(GAME_AREA_WIDTH, GAME_AREA_HEIGHT);
             game.witchTime.circleWipe = {
                 radius: 0,
-                targetRadius: maxDimension,
-                speed: maxDimension / 20, // ~20 frames
+                targetRadius: Math.max(canvas.width, canvas.height),
+                speed: Math.max(canvas.width, canvas.height) / 20, // ~20 frames
                 centerX: player.x,
                 centerY: player.y,
                 expanding: true // Flag to indicate this is opening, not closing
@@ -1381,30 +1060,10 @@
             
             // Big hitfreeze for activation impact (same as charged attack)
             game.hitFreeze = 15;
-            game.screenShake = 20;
-
-            // WITCH TIME ACTIVATION EMPHASIS
-            // Large expanding shockwave (~50% of viewport)
-            spawnShockwave(player.x, player.y, '#ff00ff', 400);
-            spawnShockwave(player.x, player.y, '#8800ff', 300);
-            spawnShockwave(player.x, player.y, '#ffffff', 200);
-
-            // Burst of purple/magenta particles radiating outward
-            for (let i = 0; i < 30; i++) {
-                const angle = (i / 30) * Math.PI * 2;
-                const speed = 8 + Math.random() * 6;
-                const color = Math.random() > 0.5 ? '#ff00ff' : '#aa00ff';
-                game.particles.push({
-                    x: player.x,
-                    y: player.y,
-                    vx: Math.cos(angle) * speed,
-                    vy: Math.sin(angle) * speed,
-                    life: 40 + Math.random() * 20,
-                    maxLife: 60,
-                    radius: 4 + Math.random() * 4,
-                    color
-                });
-            }
+            game.screenShake = 15;
+            
+            // Visual feedback
+            spawnShockwave(player.x, player.y, '#8800ff', 150);
             
             // Small dash towards enemy
             player.dashAngle = Math.atan2(enemy.y - player.y, enemy.x - player.x);
@@ -1416,117 +1075,18 @@
             spawnDust(player.x, player.y, player.dashAngle);
         }
 
-        // Manual witch time activation (P key / R2 when charged)
-        function activateWitchTimeManual() {
-            const player = game.player;
-
-            // Stun all nearby enemies
-            game.enemies.forEach(e => {
-                if (e.health <= 0 || e.dead) return;
-                const dx = e.x - player.x;
-                const dy = e.y - player.y;
-                if (Math.sqrt(dx * dx + dy * dy) < 300) {
-                    e.isStunned = true;
-                    e.stunTimer = 300;
-                    e.isCharging = false;
-                    e.chargeTime = 0;
-                    e.inParryWindow = false;
-                    e.hasBlinked = false;
-                    e.laserCharging = false;
-                    e.laserChargeTime = 0;
-                }
-            });
-
-            // Activate Witch Time
-            game.witchTime.active = true;
-            game.witchTime.timer = game.witchTime.maxTime;
-            game.witchTime.perfectClear = false;
-            game.witchTime.perfectClearTimer = 0;
-            game.slowMotion = 0.15;
-            game.violetFilter = 0.4;
-
-            // Zoom IN for dramatic effect
-            camera.targetZoom = camera.witchTimeZoom;
-
-            // Circle wipe expanding FROM player (opening animation)
-            const maxDimension = Math.max(GAME_AREA_WIDTH, GAME_AREA_HEIGHT);
-            game.witchTime.circleWipe = {
-                radius: 0,
-                targetRadius: maxDimension,
-                speed: maxDimension / 20,
-                centerX: player.x,
-                centerY: player.y,
-                expanding: true
-            };
-
-            // Consume witch time charge
-            game.witchTimeCharge.charge = 0;
-            game.witchTimeCharge.ready = false;
-            game.witchTimeCharge.canCharge = false;
-
-            // Slash effect
-            createSlashEffect(chargedMeleeAttack, player.angle, player.x, player.y, false, true);
-
-            // Auto-slice enemies in range
-            const activationSliceRange = 300;
-            game.enemies.forEach(e => {
-                if (e.health <= 0 || e.dead) return;
-                const dx = e.x - player.x;
-                const dy = e.y - player.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-
-                if (dist < activationSliceRange) {
-                    const slashAngle = Math.atan2(dy, dx);
-                    const tripleChargeDamage = chargedMeleeAttack.damage * 3;
-                    e.health -= tripleChargeDamage;
-                    e.hit = 15;
-                    spawnParticles(e.x, e.y, '#ff00ff', 25, 12);
-                    spawnShockwave(e.x, e.y, '#ff00ff', 70);
-                    sliceEnemyOrPiece(e, slashAngle, true);
-                }
-            });
-
-            // Visual effects
-            game.hitFreeze = 15;
-            game.screenShake = 20;
-            spawnShockwave(player.x, player.y, '#ff00ff', 400);
-            spawnShockwave(player.x, player.y, '#8800ff', 300);
-            spawnShockwave(player.x, player.y, '#ffffff', 200);
-
-            // Burst of particles
-            for (let i = 0; i < 30; i++) {
-                const angle = (i / 30) * Math.PI * 2;
-                const speed = 8 + Math.random() * 6;
-                const color = Math.random() > 0.5 ? '#ff00ff' : '#aa00ff';
-                game.particles.push({
-                    x: player.x,
-                    y: player.y,
-                    vx: Math.cos(angle) * speed,
-                    vy: Math.sin(angle) * speed,
-                    life: 40 + Math.random() * 20,
-                    maxLife: 60,
-                    radius: 4 + Math.random() * 4,
-                    color
-                });
-            }
-        }
-
         function endWitchTime() {
             const player = game.player;
             
             // Start circle wipe animation (closes inward to player)
-            const maxDimension = Math.max(GAME_AREA_WIDTH, GAME_AREA_HEIGHT);
             game.witchTime.circleWipe = {
-                radius: maxDimension,
+                radius: Math.max(canvas.width, canvas.height),
                 targetRadius: 0,
-                speed: maxDimension / 20, // ~20 frames
+                speed: Math.max(canvas.width, canvas.height) / 20, // ~20 frames
                 centerX: player.x,
                 centerY: player.y,
                 expanding: false // Closing animation
             };
-
-            // Restore normal zoom
-            camera.targetZoom = camera.normalZoom;
         }
 
         function updateWitchTime(timeScale) {
@@ -1966,9 +1526,6 @@
                     game.violetFilter = 0;
                     game.witchTimeCharge.canCharge = true;
 
-                    // Restore normal zoom
-                    camera.targetZoom = camera.normalZoom;
-
                     // Auto level up!
                     levelUp();
                 }
@@ -2195,9 +1752,8 @@
 
             player.x += player.vx * playerTime;
             player.y += player.vy * playerTime;
-            // Clamp player to game area bounds
-            player.x = Math.max(player.radius, Math.min(GAME_AREA_WIDTH - player.radius, player.x));
-            player.y = Math.max(player.radius, Math.min(GAME_AREA_HEIGHT - player.radius, player.y));
+            player.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.x));
+            player.y = Math.max(player.radius, Math.min(canvas.height - player.radius, player.y));
 
 
             // Full autoaim
@@ -2224,15 +1780,6 @@
 
             // Dash: L1 (gamepad) or O (keyboard)
             if ((gamepad && buttonJustPressed(gamepad.buttons, 4)) || keysJustPressed['KeyO']) dash();
-
-            // Manual Witch Time activation: R2 (gamepad) or P (keyboard) when bar is full
-            // Only if not in slot machine and witch time is ready
-            if (!slotMachine.active && game.witchTimeCharge.ready && !game.witchTime.active) {
-                const r2JustPressed = gamepad && buttonJustPressed(gamepad.buttons, 7);
-                if (r2JustPressed || keysJustPressed['KeyP']) {
-                    activateWitchTimeManual();
-                }
-            }
 
             // Update gamepad button state
             if (gamepad) {
@@ -2280,13 +1827,8 @@
                 const dy = player.y - enemy.y;
                 const distToPlayer = Math.sqrt(dx * dx + dy * dy);
                 const angleToPlayer = Math.atan2(dy, dx);
-
+                
                 enemy.isAggro = distToPlayer < enemy.aggroRange;
-
-                // Boss laser attack system
-                if (enemy.type === ENEMY_BOSS) {
-                    updateBossLaser(enemy, distToPlayer, angleToPlayer, enemyTime);
-                }
 
                 if (enemy.isAggro || enemy.isCharging) {
                     let targetAngle = angleToPlayer;
@@ -2386,15 +1928,14 @@
                 enemy.x += enemy.vx * enemyTime;
                 enemy.y += enemy.vy * enemyTime;
 
-                // Clamp enemies to game area bounds
                 const boundSize = enemy.size / 2;
-                if (enemy.x < boundSize || enemy.x > GAME_AREA_WIDTH - boundSize) {
+                if (enemy.x < boundSize || enemy.x > canvas.width - boundSize) {
                     enemy.vx *= -1;
-                    enemy.x = Math.max(boundSize, Math.min(GAME_AREA_WIDTH - boundSize, enemy.x));
+                    enemy.x = Math.max(boundSize, Math.min(canvas.width - boundSize, enemy.x));
                 }
-                if (enemy.y < boundSize || enemy.y > GAME_AREA_HEIGHT - boundSize) {
+                if (enemy.y < boundSize || enemy.y > canvas.height - boundSize) {
                     enemy.vy *= -1;
-                    enemy.y = Math.max(boundSize, Math.min(GAME_AREA_HEIGHT - boundSize, enemy.y));
+                    enemy.y = Math.max(boundSize, Math.min(canvas.height - boundSize, enemy.y));
                 }
 
                 if (enemy.hit > 0) enemy.hit -= enemyTime;
@@ -2472,8 +2013,7 @@
                         return false;
                     }
                 }
-                // Remove bullets outside game area (with margin)
-                if (bullet.x < -50 || bullet.x > GAME_AREA_WIDTH + 50 || bullet.y < -50 || bullet.y > GAME_AREA_HEIGHT + 50) return false;
+                if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) return false;
                 return bullet.life > 0;
             });
 
@@ -2628,39 +2168,20 @@
 
         function render() {
             const player = game.player;
-
-            // Calculate camera offset for world-to-screen transformation
+            
             ctx.save();
-
+            
             if (game.screenShake > 0.5) {
                 ctx.translate((Math.random() - 0.5) * game.screenShake * 2, (Math.random() - 0.5) * game.screenShake * 2);
             }
 
-            // Fill entire viewport with outside color
-            ctx.fillStyle = OUTSIDE_AREA_COLOR;
+            ctx.fillStyle = '#16213e';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Apply camera transformation for world space rendering (with zoom)
-            ctx.save();
-            // Translate to center, apply zoom, then offset by camera position
-            ctx.translate(VIEWPORT_WIDTH / 2, VIEWPORT_HEIGHT / 2);
-            ctx.scale(camera.zoom, camera.zoom);
-            ctx.translate(-camera.x, -camera.y);
-
-            // Draw game area background
-            ctx.fillStyle = GAME_AREA_COLOR;
-            ctx.fillRect(0, 0, GAME_AREA_WIDTH, GAME_AREA_HEIGHT);
-
-            // Grid lines (drawn BEFORE border so border appears on top)
             ctx.strokeStyle = '#1a2744';
             ctx.lineWidth = 1;
-            for (let x = 0; x < GAME_AREA_WIDTH; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, GAME_AREA_HEIGHT); ctx.stroke(); }
-            for (let y = 0; y < GAME_AREA_HEIGHT; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(GAME_AREA_WIDTH, y); ctx.stroke(); }
-
-            // Draw game area border (on top of grid, compensate thickness for zoom)
-            ctx.strokeStyle = GAME_AREA_BORDER_COLOR;
-            ctx.lineWidth = 3 / camera.zoom;
-            ctx.strokeRect(0, 0, GAME_AREA_WIDTH, GAME_AREA_HEIGHT);
+            for (let x = 0; x < canvas.width; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
+            for (let y = 0; y < canvas.height; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
 
             game.shockwaves.forEach(sw => {
                 ctx.strokeStyle = sw.color;
@@ -2859,84 +2380,8 @@
                     drawDiamond(enemy.x, enemy.y, enemy.size, enemy.angle, drawColor);
                 } else if (enemy.type === ENEMY_BOSS) {
                     drawPentagon(enemy.x, enemy.y, enemy.size, enemy.angle, drawColor);
-
-                    // Boss laser charging visual
-                    if (enemy.laserCharging || enemy.laserFiring) {
-                        const chargePercent = enemy.laserChargeTime / bossLaser.chargeTime;
-
-                        // Draw charging ring (same style as melee attack)
-                        if (enemy.laserCharging) {
-                            const maxBorderDist = 25;
-                            const borderDist = maxBorderDist - (chargePercent * maxBorderDist);
-
-                            // Yellow -> Red as charge completes
-                            let borderColor;
-                            if (chargePercent < 0.8) {
-                                borderColor = '#ffcc00';
-                            } else {
-                                borderColor = '#ff3333';
-                            }
-
-                            ctx.strokeStyle = borderColor;
-                            ctx.lineWidth = 2;
-                            ctx.globalAlpha = 0.6 + chargePercent * 0.3;
-                            ctx.beginPath();
-                            ctx.arc(enemy.x, enemy.y, enemy.size / 2 + borderDist, 0, Math.PI * 2);
-                            ctx.stroke();
-                            ctx.globalAlpha = 1;
-                        }
-
-                        // Draw aim line
-                        const laserLength = 1500;
-                        const endX = enemy.x + Math.cos(enemy.laserAimAngle) * laserLength;
-                        const endY = enemy.y + Math.sin(enemy.laserAimAngle) * laserLength;
-
-                        if (enemy.laserFiring) {
-                            // Firing - thick yellow line
-                            ctx.strokeStyle = '#ffff00';
-                            ctx.lineWidth = 8;
-                            ctx.globalAlpha = 0.9;
-                        } else {
-                            // Charging - thin line, yellow->red
-                            ctx.strokeStyle = chargePercent < 0.8 ? '#ffcc00' : '#ff3333';
-                            ctx.lineWidth = 2 + chargePercent * 3;
-                            ctx.globalAlpha = 0.4 + chargePercent * 0.4;
-                        }
-
-                        ctx.beginPath();
-                        ctx.moveTo(enemy.x, enemy.y);
-                        ctx.lineTo(endX, endY);
-                        ctx.stroke();
-                        ctx.globalAlpha = 1;
-                    }
                 }
             });
-
-            // Draw laser deflect visual if active
-            if (game.laserDeflect && game.laserDeflect.timer > 0) {
-                const deflect = game.laserDeflect;
-                const alpha = deflect.timer / 30;
-
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 6;
-                ctx.globalAlpha = alpha;
-
-                // Line from boss to player
-                ctx.beginPath();
-                ctx.moveTo(deflect.fromX, deflect.fromY);
-                ctx.lineTo(deflect.bounceX, deflect.bounceY);
-                ctx.stroke();
-
-                // Line from player to target
-                ctx.strokeStyle = '#ffff00';
-                ctx.beginPath();
-                ctx.moveTo(deflect.bounceX, deflect.bounceY);
-                ctx.lineTo(deflect.toX, deflect.toY);
-                ctx.stroke();
-
-                ctx.globalAlpha = 1;
-                deflect.timer--;
-            }
 
             game.bullets.forEach(bullet => {
                 ctx.fillStyle = bullet.color;
@@ -2972,133 +2417,46 @@
 
             // Player parry indicator removed - using enemy rings only
 
-            // Off-screen enemy indicator (arrow pointing to enemy cluster)
-            {
-                // Calculate visible area bounds
-                const viewHalfW = (VIEWPORT_WIDTH / 2) / camera.zoom;
-                const viewHalfH = (VIEWPORT_HEIGHT / 2) / camera.zoom;
-                const viewMargin = 30;  // Margin inside screen edge to consider "visible"
-
-                // Count visible vs off-screen enemies
-                let visibleCount = 0;
-                let offscreenEnemies = [];
-
-                game.enemies.forEach(enemy => {
-                    if (enemy.dead || enemy.health <= 0) return;
-
-                    const dx = enemy.x - camera.x;
-                    const dy = enemy.y - camera.y;
-
-                    // Check if enemy is within visible area
-                    const isVisible = Math.abs(dx) < viewHalfW - viewMargin &&
-                                     Math.abs(dy) < viewHalfH - viewMargin;
-
-                    if (isVisible) {
-                        visibleCount++;
-                    } else {
-                        offscreenEnemies.push({ x: enemy.x, y: enemy.y, size: enemy.size });
-                    }
-                });
-
-                // Only show indicator if:
-                // 1. There are off-screen enemies
-                // 2. 1 or fewer visible enemies (helps find last enemies)
-                if (offscreenEnemies.length > 0 && visibleCount <= 1) {
-                    // Find the CLOSEST off-screen enemy to player (not center of mass)
-                    let closestEnemy = null;
-                    let minDist = Infinity;
-                    offscreenEnemies.forEach(e => {
-                        const dist = Math.sqrt((e.x - player.x) ** 2 + (e.y - player.y) ** 2);
-                        if (dist < minDist) {
-                            minDist = dist;
-                            closestEnemy = e;
-                        }
-                    });
-
-                    if (closestEnemy) {
-                        // Calculate angle from player to closest enemy
-                        const angleToEnemy = Math.atan2(closestEnemy.y - player.y, closestEnemy.x - player.x);
-
-                        // Fade based on distance only (simpler now that we check visible count)
-                        const distanceFade = Math.min(1, (minDist - 100) / 400);  // Fade when closer than 500
-                        const alpha = Math.max(0, Math.min(0.7, distanceFade));
-
-                        if (alpha > 0.05) {
-                            // Draw indicator on a circle around player
-                            const indicatorRadius = 80;  // Distance from player center
-                            const indicatorX = player.x + Math.cos(angleToEnemy) * indicatorRadius;
-                            const indicatorY = player.y + Math.sin(angleToEnemy) * indicatorRadius;
-
-                            // Draw arrow/triangle pointing outward
-                            ctx.save();
-                            ctx.translate(indicatorX, indicatorY);
-                            ctx.rotate(angleToEnemy);
-                            ctx.globalAlpha = alpha;
-
-                            // Triangle arrow (white, no border)
-                            ctx.fillStyle = '#ffffff';
-                            ctx.beginPath();
-                            ctx.moveTo(12, 0);      // Point
-                            ctx.lineTo(-6, -8);     // Top back
-                            ctx.lineTo(-3, 0);      // Inner notch
-                            ctx.lineTo(-6, 8);      // Bottom back
-                            ctx.closePath();
-                            ctx.fill();
-
-                            ctx.restore();
-                            ctx.globalAlpha = 1;
-                        }
-                    }
-                }
-            }
-
-            // Witch time timer indicator (around player) - in world space
-            if (game.witchTime.active && !game.witchTime.circleWipe) {
-                const wt = game.witchTime;
-                const progress = wt.timer / wt.maxTime;
-                const arcRadius = player.radius + 25;
-
-                // Background arc
-                ctx.strokeStyle = '#333333';
-                ctx.lineWidth = 4;
-                ctx.beginPath();
-                ctx.arc(player.x, player.y, arcRadius, 0, Math.PI * 2);
-                ctx.stroke();
-
-                // Progress arc
-                ctx.strokeStyle = progress < 0.25 ? '#ff4444' : '#8800ff';
-                ctx.lineWidth = 4;
-                ctx.beginPath();
-                ctx.arc(player.x, player.y, arcRadius, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
-                ctx.stroke();
-            }
-
-            // End world space rendering (camera transform)
             ctx.restore();
-
-            // Screen-space effects (no camera transform)
 
             // Witch time color filter
             if (game.witchTime.active && game.violetFilter > 0.01) {
                 ctx.fillStyle = `rgba(136, 0, 255, ${game.violetFilter * 0.3})`;
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
             }
-
-            // Witch time circle wipe (expanding or closing) - needs screen coords
+            
+            // Witch time circle wipe (expanding or closing)
             if (game.witchTime.circleWipe) {
                 const wipe = game.witchTime.circleWipe;
-                // Convert wipe center to screen coords using helper
-                const wipeScreen = worldToScreen(wipe.centerX, wipe.centerY);
-                const screenWipeX = wipeScreen.x;
-                const screenWipeY = wipeScreen.y;
                 ctx.fillStyle = '#000000';
                 ctx.beginPath();
                 // Draw a rectangle with a circular hole
                 // For expanding: hole grows from 0 to full (revealing from center)
                 // For closing: hole shrinks from full to 0 (closing to center)
                 ctx.rect(0, 0, canvas.width, canvas.height);
-                ctx.arc(screenWipeX, screenWipeY, Math.max(0, wipe.radius), 0, Math.PI * 2, true);
+                ctx.arc(wipe.centerX, wipe.centerY, Math.max(0, wipe.radius), 0, Math.PI * 2, true);
                 ctx.fill();
+            }
+            
+            // Witch time timer indicator (around player)
+            if (game.witchTime.active && !game.witchTime.circleWipe) {
+                const wt = game.witchTime;
+                const progress = wt.timer / wt.maxTime;
+                const arcRadius = player.radius + 25;
+                
+                // Background arc
+                ctx.strokeStyle = '#333333';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, arcRadius, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                // Progress arc
+                ctx.strokeStyle = progress < 0.25 ? '#ff4444' : '#8800ff';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, arcRadius, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+                ctx.stroke();
             }
             
             // UI Layer (not affected by screen shake)
@@ -3107,8 +2465,8 @@
             
             // Witch Time Charge Bar (hidden during witch time, always visible otherwise)
             if (!inWitchTime) {
-                const wtBarWidth = 450;  // 50% wider
-                const wtBarHeight = 12;
+                const wtBarWidth = 350;
+                const wtBarHeight = 15;
                 const wtBarX = (canvas.width - wtBarWidth) / 2;
                 const wtBarY = 30;
                 
@@ -3133,11 +2491,11 @@
                 ctx.fillStyle = barColor;
                 ctx.fillRect(wtBarX, wtBarY, wtBarWidth * chargePercent, wtBarHeight);
                 
-                // Label hidden per user request
-                // ctx.fillStyle = '#ffffff';
-                // ctx.font = 'bold 12px sans-serif';
-                // ctx.textAlign = 'center';
-                // ctx.fillText('WITCH TIME', canvas.width / 2, wtBarY - 8);
+                // Label
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('WITCH TIME', canvas.width / 2, wtBarY - 8);
             }
             
             // Only show XP, power-ups, and weapon during non-witch-time
@@ -3147,7 +2505,7 @@
                 ctx.textBaseline = 'alphabetic';
                 
                 // XP Bar
-                const barWidth = 450;  // 50% wider
+                const barWidth = 300;
                 const barHeight = 12;
                 const barX = (canvas.width - barWidth) / 2;
                 const barY = canvas.height - 40;
@@ -3158,37 +2516,22 @@
                 ctx.fillStyle = '#2a2a4e';
                 ctx.fillRect(barX, barY, barWidth, barHeight);
                 
-                // XP fill (yellow)
+                // XP fill
                 const xpPercent = xpSystem.xp / xpSystem.xpToNext;
-                ctx.fillStyle = '#ffdd00';
+                ctx.fillStyle = '#4ecca3';
                 ctx.fillRect(barX, barY, barWidth * xpPercent, barHeight);
                 
-                // Row above XP bar: LVL (left) | Icons (center) | Weapon (right)
-                const iconY = barY - 18;
-
-                // Level text (aligned to left edge of XP bar)
+                // Level text
                 ctx.fillStyle = '#ffffff';
                 ctx.font = 'bold 14px sans-serif';
-                ctx.textAlign = 'left';
-                ctx.fillText(`LVL ${xpSystem.level}`, barX, iconY);
-
-                // Weapon display (aligned to right edge of XP bar)
-                const weaponName = game.weapon.name || 'SMG';
-                ctx.font = 'bold 14px sans-serif';
-                ctx.textAlign = 'right';
-                ctx.fillStyle = game.weapon.color;
-                ctx.fillText(weaponName, barX + barWidth, iconY);
-
-                // Power-up icons (centered in the middle)
-                const iconSpacing = 40;
-                let totalIconWidth = 0;
-                powerUpOrder.forEach(key => {
-                    if (powerUps[key] > 0) totalIconWidth += iconSpacing;
-                });
-
-                const iconStartX = (canvas.width - totalIconWidth) / 2;
+                ctx.textAlign = 'center';
+                ctx.fillText(`LVL ${xpSystem.level}`, canvas.width / 2, barY - 8);
+                
+                // Power-up icons above XP bar (left to right in order of acquisition)
+                const iconStartX = barX;
+                const iconY = barY - 35;
                 let iconOffset = 0;
-
+                
                 powerUpOrder.forEach(key => {
                     const cfg = powerUpConfig[key];
                     const count = powerUps[key];
@@ -3199,24 +2542,30 @@
                         ctx.fillText(cfg.icon, iconStartX + iconOffset, iconY);
                         ctx.font = 'bold 12px sans-serif';
                         ctx.fillStyle = '#ffffff';
-                        ctx.fillText(`${count}`, iconStartX + iconOffset + 20, iconY);
-                        iconOffset += iconSpacing;
+                        ctx.fillText(`${count}`, iconStartX + iconOffset + 22, iconY);
+                        iconOffset += 45;
                     }
                 });
+                
+                // Weapon display (right side of XP bar)
+                const weaponName = game.weapon.name || 'SMG';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillStyle = game.weapon.color;
+                ctx.fillText(weaponName, barX + barWidth, iconY);
                 
                 // Reset text align to default
                 ctx.textAlign = 'left';
             }
             
-            // Slot Machine UI - floating next to player (in screen space)
+            // Slot Machine UI - floating next to player (in world space, before ctx.restore)
             if (slotMachine.active) {
                 const currentOption = slotMachine.options[slotMachine.currentIndex];
                 const cfg = powerUpConfig[currentOption];
-
-                // Position floating to the right of player (convert to screen coords)
-                const playerScreen = worldToScreen(player.x, player.y);
-                const floatX = playerScreen.x + 50;
-                const floatY = playerScreen.y - 30;
+                
+                // Position floating to the right of player
+                const floatX = player.x + 50;
+                const floatY = player.y - 30;
                 
                 // Box size
                 const boxSize = 40;
@@ -3297,15 +2646,14 @@
                 // Screen shake during perfect clear
                 game.screenShake = 12;
                 
-                // Spawn particles from text position (center of viewport in world coords)
+                // Spawn particles from text position
                 if (Math.floor(game.witchTime.perfectClearTimer) % 3 === 0) {
-                    // Convert screen center to world coordinates
-                    const worldCenterX = camera.x;
-                    const worldCenterY = camera.y;
+                    const centerX = canvas.width / 2;
+                    const centerY = canvas.height / 2;
                     for (let i = 0; i < 3; i++) {
                         const angle = Math.random() * Math.PI * 2;
-                        const dist = (100 + Math.random() * 150) / camera.zoom;  // Adjust for zoom
-                        spawnParticles(worldCenterX + Math.cos(angle) * dist, worldCenterY + Math.sin(angle) * dist, '#ffffff', 3, 6);
+                        const dist = 100 + Math.random() * 150;
+                        spawnParticles(centerX + Math.cos(angle) * dist, centerY + Math.sin(angle) * dist, '#ffffff', 3, 6);
                     }
                 }
                 
@@ -3333,9 +2681,7 @@
                 
                 ctx.restore();
             }
-
-            // End screen shake transform
-            ctx.restore();
+            
         }
 
         function gameLoop() {
@@ -3343,7 +2689,6 @@
             let activeGamepad = null;
             for (const gp of gamepads) { if (gp && gp.connected) { activeGamepad = gp; break; } }
             update(activeGamepad); // Always update, gamepad can be null
-            updateCamera(); // Update camera position (Hotline Miami style deadzone)
             render();
             requestAnimationFrame(gameLoop);
         }
@@ -3352,12 +2697,8 @@
         window.addEventListener('gamepaddisconnected', (e) => console.log('Gamepad disconnected'));
 
         resizeCanvas();
-        // Initialize player at center of game area
-        game.player.x = GAME_AREA_WIDTH / 2;
-        game.player.y = GAME_AREA_HEIGHT / 2;
-        // Initialize camera at player position
-        camera.x = game.player.x;
-        camera.y = game.player.y;
+        game.player.x = canvas.width / 2;
+        game.player.y = canvas.height / 2;
         initEnemies();
         gameLoop();
     </script>
