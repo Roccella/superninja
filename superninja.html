@@ -189,10 +189,10 @@
                 angle: 0,
                 baseSpeed: 3.5, // Reduced starting speed (was 4.5)
                 speed: 3.5,
-                baseDashSpeed: 25,  // Middle ground (was 22, then 28)
-                dashSpeed: 25,
-                baseDashDuration: 34,  // Middle ground (was 30, then 38)
-                dashDurationMax: 34,
+                baseDashSpeed: 18,  // Nerfed 30% (was 25)
+                dashSpeed: 18,
+                baseDashDuration: 24,  // Nerfed 30% (was 34)
+                dashDurationMax: 24,
                 isDashing: false,
                 dashCooldown: 0,
                 dashDuration: 0,
@@ -208,6 +208,9 @@
                 meleeCooldown: 0,
                 meleeFrame: 0,
                 lastMeleeWasCharged: false, // Track if current melee is charged (for laser deflect)
+                meleeComboCount: 0,         // Combo counter (0, 1, 2) - 3rd hit is special
+                lastMeleeWasComboFinisher: false, // Track if current melee is combo finisher (for laser deflect)
+                comboResetTimer: 0,         // Reset combo if no attack within this time
                 dashMeleeUsed: false,
                 isChargingMelee: false,
                 meleeChargeTime: 0,
@@ -586,8 +589,8 @@
                 // Check if player is in the laser aim path (for auto-aim to this enemy)
                 checkLaserTargetingPlayer(enemy);
 
-                // Deflect check - can deflect anytime during charge if player is doing CHARGED melee
-                if (player.meleeFrame > 0 && player.meleeFrame < 12 && player.lastMeleeWasCharged) {
+                // Deflect check - can deflect anytime during charge if player is doing CHARGED melee or COMBO FINISHER
+                if (player.meleeFrame > 0 && player.meleeFrame < 12 && (player.lastMeleeWasCharged || player.lastMeleeWasComboFinisher)) {
                     const laserLength = 1500;
                     const laserEndX = enemy.x + Math.cos(enemy.laserAimAngle) * laserLength;
                     const laserEndY = enemy.y + Math.sin(enemy.laserAimAngle) * laserLength;
@@ -674,8 +677,8 @@
             const playerDist = pointToLineDistance(player.x, player.y, enemy.x, enemy.y, laserEndX, laserEndY);
 
             if (playerDist < laserWidth + player.radius) {
-                // Check if player is doing CHARGED melee (only charged melee can deflect)
-                if (player.meleeFrame > 0 && player.meleeFrame < 12 && player.lastMeleeWasCharged) {
+                // Check if player is doing CHARGED melee or COMBO FINISHER (can deflect)
+                if (player.meleeFrame > 0 && player.meleeFrame < 12 && (player.lastMeleeWasCharged || player.lastMeleeWasComboFinisher)) {
                     deflectLaser(enemy);
                 } else if (!player.isDashing && !player.isHurt) {
                     // Player hit by laser
@@ -1782,25 +1785,21 @@
                 const dx = e.x - player.x;
                 const dy = e.y - player.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                
+
                 if (dist < activationSliceRange) {
-                    const slashAngle = Math.atan2(dy, dx);
-                    
-                    // COMMENTED: Individual slash effects per enemy (may revert this)
-                    // If you want slash effects on each enemy, uncomment the line below:
-                    // createSlashEffect(chargedMeleeAttack, slashAngle, e.x, e.y, false, true);
-                    
-                    // Apply massive damage (3x charged)
+                    // Apply massive damage (3x charged) - kills most enemies instantly
                     const tripleChargeDamage = chargedMeleeAttack.damage * 3;
                     e.health -= tripleChargeDamage;
                     e.hit = 15;
-                    
+
                     // Visual feedback
                     spawnParticles(e.x, e.y, '#ff00ff', 25, 12);
                     spawnShockwave(e.x, e.y, '#ff00ff', 70);
-                    
-                    // Slice enemy (handles death, XP, etc)
-                    sliceEnemyOrPiece(e, slashAngle, true);
+
+                    // Use killEnemy so pieces are properly cuttable during witch time
+                    if (e.health <= 0) {
+                        killEnemy(e, player.x, player.y, true);
+                    }
                 }
             });
             
@@ -1892,7 +1891,7 @@
             // Slash effect
             createSlashEffect(chargedMeleeAttack, player.angle, player.x, player.y, false, true);
 
-            // Auto-slice enemies in range
+            // Auto-slice enemies in range - create suspended pieces directly
             const activationSliceRange = 300;
             game.enemies.forEach(e => {
                 if (e.health <= 0 || e.dead) return;
@@ -1901,13 +1900,32 @@
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
                 if (dist < activationSliceRange) {
-                    const slashAngle = Math.atan2(dy, dx);
                     const tripleChargeDamage = chargedMeleeAttack.damage * 3;
                     e.health -= tripleChargeDamage;
                     e.hit = 15;
                     spawnParticles(e.x, e.y, '#ff00ff', 25, 12);
                     spawnShockwave(e.x, e.y, '#ff00ff', 70);
-                    sliceEnemyOrPiece(e, slashAngle, true);
+                    if (e.health <= 0) {
+                        // Mark enemy as dead and handle XP/respawn
+                        e.dead = true;
+                        if (e.type === ENEMY_BOSS) {
+                            e.respawnTimer = 400 + Math.random() * 200;
+                            game.bossActive = false;
+                        } else {
+                            e.respawnTimer = 200 + Math.random() * 150;
+                        }
+                        addXP(e.type);
+
+                        // Create pieces directly in 'suspended' state for witch time activation
+                        if (game.slashDeaths.length < 15) {
+                            const slashAngle = Math.atan2(player.y - e.y, player.x - e.x);
+                            game.slashDeaths.push({
+                                x: e.x, y: e.y, size: e.size, color: e.color, type: e.type,
+                                slashAngle, phase: 'suspended', timer: 0, separation: 40,
+                                finalSep: 40 // Already separated
+                            });
+                        }
+                    }
                 }
             });
 
@@ -2074,7 +2092,7 @@
                 spawnParticles(target.x, target.y, target.color, 5, 3);
             }
             
-            // Slash line effect
+            // Slash death effect - use 'flash' phase so pieces can be cut during witch time
             if (game.slashDeaths.length < 20) {
                 game.slashDeaths.push({
                     x: target.x, y: target.y,
@@ -2082,7 +2100,7 @@
                     color: target.color,
                     type: target.type,
                     slashAngle: slashAngle,
-                    phase: 'line',
+                    phase: 'flash', // Use flash so it transitions to split->suspended (cuttable)
                     timer: 0,
                     separation: 0
                 });
@@ -2186,11 +2204,36 @@
 
         function executeMeleeAttack(isCharged) {
             const player = game.player;
-            const attack = isCharged ? chargedMeleeAttack : meleeAttack;
+
+            // Combo system - 3rd hit is special (only for normal attacks, not charged)
+            let isComboFinisher = false;
+            if (!isCharged) {
+                player.meleeComboCount = (player.meleeComboCount + 1) % 3;
+                isComboFinisher = (player.meleeComboCount === 0); // 0 means we just did hit 3
+                player.comboResetTimer = 45; // Reset combo after ~0.75 sec of no attacks
+            } else {
+                // Charged attacks reset combo
+                player.meleeComboCount = 0;
+            }
+            player.lastMeleeWasComboFinisher = isComboFinisher;
+
+            // Get base attack, modify if combo finisher
+            let attack = isCharged ? chargedMeleeAttack : meleeAttack;
+            if (isComboFinisher && !isCharged) {
+                // Combo finisher: 1.5x damage, slightly larger, violet color
+                attack = {
+                    ...meleeAttack,
+                    damage: meleeAttack.damage * 1.5,
+                    range: meleeAttack.range * 1.15,
+                    arc: meleeAttack.arc * 1.1,
+                    color: '#aa44ff' // Violet
+                };
+            }
+
             player.meleeFrame = attack.duration;
             player.meleeCooldown = attack.cooldown;
             player.lastMeleeWasCharged = isCharged; // Track for laser deflect
-            
+
             // Find closest enemy for melee targeting (priority: live enemies > suspended pieces)
             let closestEnemy = null;
             let closestDist = Infinity;
@@ -2812,11 +2855,13 @@
                 } else if (death.phase === 'flash') {
                     if (death.timer > 8) { death.phase = 'split'; death.timer = 0; }
                 } else if (death.phase === 'split') {
+                    // For suspension: also count expanding circleWipe as witch time (activation kills)
+                    const shouldSuspend = inWitchTime || (game.witchTime.active && game.witchTime.circleWipe && game.witchTime.circleWipe.expanding);
                     // Faster separation in witch time so pieces can be cut sooner
-                    death.separation += inWitchTime ? 6 : 3;
+                    death.separation += shouldSuspend ? 6 : 3;
                     if (death.timer > 6) { // Faster transition (was 15)
                         // In witch time: suspend the pieces instead of exploding
-                        if (inWitchTime && death.size >= 12) {
+                        if (shouldSuspend && death.size >= 12) {
                             death.phase = 'suspended';
                             death.timer = 0;
                             // Store final positions of both halves
@@ -2830,8 +2875,9 @@
                     }
                 } else if (death.phase === 'suspended') {
                     // Pieces suspended in air during witch time - can be re-cut
-                    // When witch time ends, explode
-                    if (!inWitchTime) {
+                    // When witch time ends, explode (but stay alive during expanding circleWipe)
+                    const staysSuspended = inWitchTime || (game.witchTime.active && game.witchTime.circleWipe && game.witchTime.circleWipe.expanding);
+                    if (!staysSuspended) {
                         death.phase = 'explode'; death.timer = 0;
                         spawnParticles(death.x, death.y, '#ff0000', 10, 6);
                         spawnParticles(death.x, death.y, death.color, 8, 5);
@@ -2852,14 +2898,16 @@
                         death.vy *= 0.9;
                     }
                     // Halves last much longer so player can cut them, quarters shorter
+                    // Also count expanding circleWipe as witch time (activation kills)
+                    const piecesInWitchTime = inWitchTime || (game.witchTime.active && game.witchTime.circleWipe && game.witchTime.circleWipe.expanding);
                     const isQuarter = death.phase === 'quarter' || death.size < 25;
-                    const maxTime = inWitchTime ? (isQuarter ? 90 : 360) : 30; // Halves: 6 sec, Quarters: 1.5 sec
+                    const maxTime = piecesInWitchTime ? (isQuarter ? 90 : 360) : 30; // Halves: 6 sec, Quarters: 1.5 sec
                     if (death.timer > maxTime) {
                         spawnParticles(death.x, death.y, death.color, 6, 3);
                         return false;
                     }
                     // When witch time ends, explode quickly
-                    if (!inWitchTime && death.timer > 20) {
+                    if (!piecesInWitchTime && death.timer > 20) {
                         spawnParticles(death.x, death.y, death.color, 4, 2);
                         return false;
                     }
@@ -2992,6 +3040,14 @@
             if (player.dashCooldown > 0 && !player.isDashing) player.dashCooldown -= playerTime;
             if (player.meleeCooldown > 0) player.meleeCooldown -= playerTime;
             if (player.meleeFrame > 0) player.meleeFrame -= playerTime;
+
+            // Combo reset timer - reset combo count if no attack within time window
+            if (player.comboResetTimer > 0) {
+                player.comboResetTimer -= playerTime;
+                if (player.comboResetTimer <= 0) {
+                    player.meleeComboCount = 0;
+                }
+            }
 
             const chargeVisualDelay = 10;
             if (player.isChargingMelee && !player.isParrying) {
