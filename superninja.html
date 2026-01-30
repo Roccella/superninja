@@ -369,7 +369,7 @@
                 fireDuration: 8,     // 70% of 12
                 damage: 1,
                 lineWidth: 2,        // Same as melee charge rings
-                fireLineWidth: 0.4   // Thin laser beam
+                fireLineWidth: 0.17  // Thin laser beam (30% thinner)
             },
             // Boss laser
             boss: {
@@ -378,7 +378,7 @@
                 fireDuration: 18,    // 70% of 25
                 damage: 2,
                 lineWidth: 2,        // Same as melee charge rings
-                fireLineWidth: 0.8   // Thin laser beam
+                fireLineWidth: 0.28  // Thin laser beam
             }
         };
 
@@ -393,7 +393,7 @@
             const configs = {
                 [ENEMY_NORMAL]: { baseSpeed: 0.7, size: 35, health: 2, color: '#e94560', aggroSpeed: 1.3, parryHealth: 1 },
                 [ENEMY_BIG]: { baseSpeed: 0.45, size: 45, health: 5, color: '#5a6fd6', aggroSpeed: 1.0, parryHealth: 1 },
-                [ENEMY_BOSS]: { baseSpeed: 0.3, size: 55, health: 12, color: '#d4aa00', aggroSpeed: 0.7, parryHealth: 3 }
+                [ENEMY_BOSS]: { baseSpeed: 0.3, size: 66, health: 12, color: '#d4aa00', aggroSpeed: 0.7, parryHealth: 3 }
             };
             
             const cfg = configs[type];
