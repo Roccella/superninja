@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Ninja Hyper Mega Ultra v37</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <title>Super Ninja Hyper Mega Ultra v51</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { 
@@ -34,10 +35,10 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-        // Fixed viewport and game area dimensions
-        const VIEWPORT_WIDTH = 1200;
-        const VIEWPORT_HEIGHT = 800;
-        const GAME_AREA_WIDTH = 2000;  // ~16:10 ratio, approx double viewport
+        // Dynamic viewport (fullscreen) and game area dimensions
+        let VIEWPORT_WIDTH = window.innerWidth;
+        let VIEWPORT_HEIGHT = window.innerHeight;
+        const GAME_AREA_WIDTH = 2000;  // ~16:10 ratio
         const GAME_AREA_HEIGHT = 1250;
         const GAME_AREA_BORDER_COLOR = '#4ecca3';
         const OUTSIDE_AREA_COLOR = '#0a0a14';
@@ -49,11 +50,11 @@
             y: GAME_AREA_HEIGHT / 2,
             deadzone: 40,  // Player can move this much before camera follows
             smoothing: 0.08,  // How smoothly camera catches up (0-1, lower = smoother)
-            zoom: 1.0,        // Current zoom level (1.0 = normal, <1 = zoomed out)
-            targetZoom: 1.0,  // Target zoom to animate towards
+            zoom: 1.2,        // Current zoom level (starts at normalZoom)
+            targetZoom: 1.2,  // Target zoom to animate towards (starts at normalZoom)
             zoomSmoothing: 0.06,  // How smoothly zoom transitions
-            normalZoom: 1.0,
-            witchTimeZoom: 1.2  // Zoom IN during witch time for dramatic effect
+            normalZoom: 1.2,     // Zoomed IN during normal time (bigger view)
+            witchTimeZoom: 1.0  // Zoom OUT during witch time (see more)
         };
 
         // Keyboard state
@@ -82,10 +83,13 @@
         }
 
         function resizeCanvas() {
-            // Fixed viewport size
+            // Dynamic viewport - fullscreen
+            VIEWPORT_WIDTH = window.innerWidth;
+            VIEWPORT_HEIGHT = window.innerHeight;
             canvas.width = VIEWPORT_WIDTH;
             canvas.height = VIEWPORT_HEIGHT;
         }
+        window.addEventListener('resize', resizeCanvas);
 
         function updateCamera() {
             const player = game.player;
@@ -126,29 +130,30 @@
             xp: 0,
             level: 1,
             xpToNext: 100,
-            xpPerKill: { normal: 15, big: 35, boss: 100 }
+            xpPerKill: { normal: 15, big: 50, boss: 150 }, // Big and boss give more XP
+            levelUpFlash: 0,  // Flash timer for XP bar when leveling up
+            hitFlash: 0       // Flash timer when gaining XP
         };
 
-        // Power-up system
+        // Power-up system - each powerup improves 2 stats
         const powerUps = {
-            speed: 0,
-            meleeDamage: 0,
-            gunDamage: 0,
-            fireRate: 0,
-            spikeDamage: 0,
-            chargeSpeed: 0
+            melee: 0,      // Melee damage + sword size (including charged)
+            gun: 0,        // Gun damage + ROF
+            dash: 0,       // Dash speed + distance
+            witchTime: 0,  // Duration + enemy slowdown
+            regen: 0       // HP regen rate + charge speed
         };
-        
+
         // Track order of power-up acquisition (for left-to-right display)
         const powerUpOrder = [];
 
+        // Power-up config - each improves 2 stats
         const powerUpConfig = {
-            speed: { icon: '⚡', name: 'SPD', color: '#00ff88', bonus: 0.5 },
-            meleeDamage: { icon: '⚔️', name: 'MEL', color: '#ff00ff', bonus: 0.3 },
-            gunDamage: { icon: '🔫', name: 'DMG', color: '#ff4444', bonus: 0.15 },
-            fireRate: { icon: '🔥', name: 'ROF', color: '#ffaa00', bonus: 15 },
-            spikeDamage: { icon: '🗡️', name: 'SPK', color: '#00aaff', bonus: 0.4 },
-            chargeSpeed: { icon: '⏱️', name: 'CHG', color: '#ff88ff', bonus: 8 }
+            melee: { icon: '🗡️', name: 'MEL', color: '#ff00ff' },     // Damage + sword size
+            gun: { icon: '🔫', name: 'GUN', color: '#ff4444' },       // Damage + ROF
+            dash: { icon: '💨', name: 'DSH', color: '#00ff88' },      // Speed + distance
+            witchTime: { icon: '⏱️', name: 'WTC', color: '#aa00ff' }, // Duration + slowdown
+            regen: { icon: '❤️', name: 'REG', color: '#ff6666' }      // Regen + charge speed
         };
 
         // Slot machine state - floating next to player
@@ -157,21 +162,24 @@
             spinning: true,
             currentIndex: 0,
             spinTimer: 0,
-            maxSpinTime: 240, // 4 seconds at 60fps
-            options: ['speed', 'meleeDamage', 'gunDamage', 'fireRate', 'spikeDamage', 'chargeSpeed'],
+            maxSpinTime: 180, // 3 seconds at 60fps (auto-select)
+            options: ['melee', 'gun', 'dash', 'witchTime', 'regen'],
             selectedOption: null,
             displayTimer: 0,
             shuffleTimer: 0
         };
         
-        // Weapon system
+        // Weapon system - ROF starts at 33% speed (3x higher delay), improves with levels
         const weapons = {
-            smg: { name: 'SMG', baseFireRate: 120, fireRate: 120, bulletSpeed: 14, baseDamage: 0.3, damage: 0.3, spread: 0.15, autoAim: 0.35, color: '#44ddff', bulletsPerShot: 1 },
-            // pistol: { name: 'PISTOL', baseFireRate: 300, fireRate: 300, bulletSpeed: 18, baseDamage: 1.2, damage: 1.2, spread: 0.05, autoAim: 0.4, color: '#ffff44', bulletsPerShot: 1 },
-            shotgun: { name: 'SHOTGUN', baseFireRate: 500, fireRate: 500, bulletSpeed: 16, baseDamage: 0.6, damage: 0.6, spread: 0.3, autoAim: 0.25, color: '#ff8844', bulletsPerShot: 6 }
+            smg: { name: 'SMG', baseFireRate: 360, fireRate: 360, bulletSpeed: 14, baseDamage: 0.2, damage: 0.2, spread: 0.15, autoAim: 0.35, color: '#44ddff', bulletsPerShot: 1 }, // 3x slower start
+            // pistol: { name: 'PISTOL', baseFireRate: 1500, fireRate: 1500, bulletSpeed: 18, baseDamage: 0.8, damage: 0.8, spread: 0.05, autoAim: 0.4, color: '#ffff44', bulletsPerShot: 1 },
+            shotgun: { name: 'SHOTGUN', baseFireRate: 1500, fireRate: 1500, bulletSpeed: 16, baseDamage: 0.4, damage: 0.4, spread: 0.3, autoAim: 0.25, color: '#ff8844', bulletsPerShot: 6 } // 3x slower start
         };
         const weaponOrder = ['smg', 'shotgun'];  // pistol disabled
         let currentWeaponIndex = 0;
+        let weaponSwitchTimer = 0;  // Timer for auto weapon switch
+        const WEAPON_AUTO_SWITCH_TIME = 600; // 10 seconds at 60fps
+        const WEAPON_SWITCH_ENEMY_RANGE = 250; // Range to check for nearby enemies
 
         const game = {
             player: {
@@ -179,9 +187,12 @@
                 vx: 0, vy: 0,
                 radius: 15,
                 angle: 0,
-                baseSpeed: 4.5, // Nerfed from 6
-                speed: 4.5,
-                dashSpeed: 22,
+                baseSpeed: 3.5, // Reduced starting speed (was 4.5)
+                speed: 3.5,
+                baseDashSpeed: 25,  // Middle ground (was 22, then 28)
+                dashSpeed: 25,
+                baseDashDuration: 34,  // Middle ground (was 30, then 38)
+                dashDurationMax: 34,
                 isDashing: false,
                 dashCooldown: 0,
                 dashDuration: 0,
@@ -191,14 +202,17 @@
                 collisionSlowdown: 0,
                 autoAimTarget: null,
                 autoAimLockTimer: 0,
+                reticleAnim: 0,        // Lock-in animation progress (0 to 1)
+                reticleRotation: 0,    // Current rotation angle for spinning markers
                 color: '#4ecca3',
                 meleeCooldown: 0,
                 meleeFrame: 0,
+                lastMeleeWasCharged: false, // Track if current melee is charged (for laser deflect)
                 dashMeleeUsed: false,
                 isChargingMelee: false,
                 meleeChargeTime: 0,
-                meleeChargeMax: 45, // Sweet spot between tap rhythm and charged power
-                baseMeleeChargeMax: 45,
+                meleeChargeMax: 42, // Faster charge (was 50)
+                baseMeleeChargeMax: 42,
                 chargeReady: false,
                 movementPause: 0,
                 isHurt: false,
@@ -213,7 +227,14 @@
                 knockbackTimer: 0,
                 isGrounded: false,
                 groundedTimer: 0,
-                parryIndicator: null
+                parryIndicator: null,
+                // Health system
+                health: 100,           // Start with full HP
+                maxHealth: 100,
+                lastDamageTime: 0,     // Frame counter since last damage
+                regenDelay: 90,        // 1.5 seconds before regen starts
+                regenRate: 0.25,       // HP per frame (50% of original 0.5)
+                baseRegenRate: 0.25
             },
             currentMoveAngle: 0,
             hasMoveInput: false,
@@ -242,82 +263,120 @@
             parryCircle: null,
             parryFreeze: false,
             parryFreezeTimer: 0,
-            laserDeflect: null, // Boss laser deflect visual
+            laserDeflect: null, // Laser deflect visual
+            laserThreat: null,  // Enemy currently targeting player with laser
+            laserThreatTimer: 0,
+            uiParticles: [], // Screen-space particles for UI effects (Perfect Clear, You Died, etc)
+            powerUpFlash: {}, // Tracks blink timers for each power-up type
+            paused: false, // Game paused state (H key)
             // Witch Time charge bar
             witchTimeCharge: {
                 charge: 0,
                 maxCharge: 100,
                 chargePerHit: 5, // Charge gained per enemy hit (20 hits to fill)
                 ready: false,
-                canCharge: true // Can only charge when witch time is not active
+                canCharge: true, // Can only charge when witch time is not active
+                justFilledFlash: 0, // Flash timer when bar just got filled
+                hitFlash: 0 // Flash timer on each hit
             },
             // Witch Time (Bayonetta-style dodge)
             witchTime: {
                 active: false,
                 timer: 0,
-                maxTime: 240, // 4 seconds at 60fps
+                baseMaxTime: 360,     // 6 seconds at 60fps (+50% from 240)
+                maxTime: 360,
+                baseEnemySpeed: 0.20, // Enemy speed during witch time
+                enemySpeed: 0.20,     // Upgradeable
                 circleWipe: null, // For end animation
-                killTimeBonus: 80, // ~1/3 of max time restored per kill
+                killTimeBonus: 100, // Time restored per kill
                 activationDash: false, // Flag for the initial dash that triggers witch time
                 hitEnemies: [], // Track which enemies were hit during activation dash
                 perfectClear: false, // Perfect clear state
-                perfectClearTimer: 0 // Timer for perfect clear animation
+                perfectClearTimer: 0, // Timer for perfect clear animation
+                rechargeFlash: 0 // Flash when time is restored during witch time
+            },
+            // Death state - simplified with fades
+            death: {
+                active: false,
+                phase: 0,           // 0=slomo+cut, 1=fadeToBlack, 2=youDied+waitRestart, 3=fadeOut, 4=fadeIn
+                timer: 0,
+                cutAngle: 0,
+                cutPhase: 0,        // 0=first cut, 1=second cut (4 pieces total)
+                fadeAlpha: 0,
+                textShakeTimer: 0,
+                canRestart: false,
+                frozen: false,
+                cameraOffset: 0     // Camera moves up during death
             }
         };
 
-        const meleeAttack = { 
-            arc: Math.PI * 0.9, duration: 8, baseDamage: 1.0, damage: 1.0, 
-            range: 65, color: '#ffffff', knockback: 10, cooldown: 12
+        // Melee attacks - slightly buffed base damage
+        const meleeAttack = {
+            arc: Math.PI * 0.9, duration: 8, baseDamage: 0.9, damage: 0.9,
+            baseRange: 65, range: 65, color: '#ffffff', knockback: 10, cooldown: 12
         };
 
         const chargedMeleeAttack = {
-            arc: Math.PI * 1.4, duration: 18, baseDamage: 2.5, damage: 2.5,
-            range: 110, color: '#ff00ff', knockback: 25, cooldown: 30
+            arc: Math.PI * 1.4, duration: 18, baseDamage: 2.0, damage: 2.0,
+            baseRange: 110, range: 110, color: '#ff00ff', knockback: 25, cooldown: 30
         };
 
         const dashMeleeAttack = {
-            baseWidth: 18, width: 18, // Nerfed from 25
-            baseLength: 160, length: 160, // Nerfed from 200
+            baseWidth: 18, width: 18,
+            baseLength: 160, length: 160,
             offset: 40,
-            baseDamage: 2.0, damage: 2.0, duration: 15, color: '#ffaa00', knockback: 20
+            baseDamage: 1.5, damage: 1.5, duration: 15, color: '#ffaa00', knockback: 20
         };
 
         const chargedDashCone = { angle: Math.PI * 0.6, range: 240, damage: 4 };
 
         const enemyAttack = {
-            chargeTime: 53, // 2/3 of original 80
-            blinkTime: 48, // 90% of chargeTime - yellow until here, then red
-            blinkDuration: 8,
-            parryWindow: 53, // Can parry anytime during charge
+            chargeTime: 35, // Less than half of original 80 (fast attacks)
+            blinkTime: 30, // 85% of chargeTime - yellow until here, then red
+            blinkDuration: 6,
+            parryWindow: 35, // Can parry anytime during charge
             damage: 1,
             range: 35,
             arc: Math.PI * 0.7,
             color: '#ff4444',
-            attackPauseDuration: 60
+            attackPauseDuration: 30 // Half of original 60
         };
 
         const bossAttack = {
-            chargeTime: 67, // 2/3 of original 100
-            blinkTime: 60, // 90% of chargeTime - yellow until here, then red
-            blinkDuration: 10,
-            parryWindow: 67, // Can parry anytime during charge
+            chargeTime: 45, // Less than half of original 100
+            blinkTime: 38, // 85% of chargeTime - yellow until here, then red
+            blinkDuration: 8,
+            parryWindow: 45, // Can parry anytime during charge
             damage: 2,
             range: 50,
             arc: Math.PI * 0.8,
             knockbackForce: 25,
             knockbackDuration: 40,
             groundedDuration: 50,
-            attackPauseDuration: 80
+            attackPauseDuration: 40 // Half of original 80
         };
 
-        // Boss laser attack system
-        const bossLaser = {
-            detectionRange: VIEWPORT_HEIGHT * 0.5,  // 50% of viewport height
-            chargeTime: 90,      // Time to charge laser (1.5 sec)
-            aimDelay: 5,         // Frames of delay in aiming (small so walkable but dashable)
-            fireDuration: 15,    // How long the laser stays visible after firing
-            damage: 1,
-            deflectWindow: 8     // Frames where melee can deflect the laser
+        // Laser attack system (for ENEMY_BIG and ENEMY_BOSS)
+        const laserConfig = {
+            getDetectionRange: () => VIEWPORT_HEIGHT * 0.5,  // 50% of viewport height (dynamic)
+            // Big enemy laser
+            big: {
+                chargeTime: 68,      // 150% of 45 - longer targeting time
+                aimDelay: 3,         // Less delay (was 4) - more responsive targeting
+                fireDuration: 8,     // 70% of 12
+                damage: 1,
+                lineWidth: 2,        // Same as melee charge rings
+                fireLineWidth: 0.4   // Thin laser beam
+            },
+            // Boss laser
+            boss: {
+                chargeTime: 120,     // 150% of 80 - longer targeting time
+                aimDelay: 4,         // Less delay (was 5) - more responsive targeting
+                fireDuration: 18,    // 70% of 25
+                damage: 2,
+                lineWidth: 2,        // Same as melee charge rings
+                fireLineWidth: 0.8   // Thin laser beam
+            }
         };
 
         const ENEMY_NORMAL = 'normal';
@@ -329,48 +388,50 @@
             let x, y, vx, vy;
             
             const configs = {
-                [ENEMY_NORMAL]: { baseSpeed: 0.5, size: 35, health: 2, color: '#e94560', aggroSpeed: 1.0, parryHealth: 1 },
-                [ENEMY_BIG]: { baseSpeed: 0.3, size: 45, health: 5, color: '#5a6fd6', aggroSpeed: 0.8, parryHealth: 1 },
-                [ENEMY_BOSS]: { baseSpeed: 0.2, size: 55, health: 12, color: '#d4aa00', aggroSpeed: 0.5, parryHealth: 3 }
+                [ENEMY_NORMAL]: { baseSpeed: 0.7, size: 35, health: 2, color: '#e94560', aggroSpeed: 1.3, parryHealth: 1 },
+                [ENEMY_BIG]: { baseSpeed: 0.45, size: 45, health: 5, color: '#5a6fd6', aggroSpeed: 1.0, parryHealth: 1 },
+                [ENEMY_BOSS]: { baseSpeed: 0.3, size: 55, health: 12, color: '#d4aa00', aggroSpeed: 0.7, parryHealth: 3 }
             };
             
             const cfg = configs[type];
             const size = cfg.size;
 
-            // Calculate visible area bounds (camera view + margin)
-            const viewMargin = 50;  // Spawn just outside visible area
-            const viewLeft = camera.x - (VIEWPORT_WIDTH / 2) / camera.zoom - viewMargin;
-            const viewRight = camera.x + (VIEWPORT_WIDTH / 2) / camera.zoom + viewMargin;
-            const viewTop = camera.y - (VIEWPORT_HEIGHT / 2) / camera.zoom - viewMargin;
-            const viewBottom = camera.y + (VIEWPORT_HEIGHT / 2) / camera.zoom + viewMargin;
+            // Calculate visible area bounds (camera view)
+            const viewHalfW = (VIEWPORT_WIDTH / 2) / camera.zoom;
+            const viewHalfH = (VIEWPORT_HEIGHT / 2) / camera.zoom;
+            const spawnMargin = 80; // Extra margin outside view
 
-            // Spawn from edges OUTSIDE camera view (clamped to game area)
+            // Always spawn OUTSIDE the camera view
             switch(edge) {
-                case 0: // Top edge
-                    x = Math.random() * GAME_AREA_WIDTH;
-                    y = Math.min(-size, viewTop - size);
+                case 0: // Top edge - above camera view
+                    x = camera.x + (Math.random() - 0.5) * viewHalfW * 2;
+                    y = camera.y - viewHalfH - spawnMargin - size;
                     vx = (Math.random() - 0.5) * cfg.baseSpeed;
                     vy = cfg.baseSpeed;
                     break;
-                case 1: // Right edge
-                    x = Math.max(GAME_AREA_WIDTH + size, viewRight + size);
-                    y = Math.random() * GAME_AREA_HEIGHT;
+                case 1: // Right edge - right of camera view
+                    x = camera.x + viewHalfW + spawnMargin + size;
+                    y = camera.y + (Math.random() - 0.5) * viewHalfH * 2;
                     vx = -cfg.baseSpeed;
                     vy = (Math.random() - 0.5) * cfg.baseSpeed;
                     break;
-                case 2: // Bottom edge
-                    x = Math.random() * GAME_AREA_WIDTH;
-                    y = Math.max(GAME_AREA_HEIGHT + size, viewBottom + size);
+                case 2: // Bottom edge - below camera view
+                    x = camera.x + (Math.random() - 0.5) * viewHalfW * 2;
+                    y = camera.y + viewHalfH + spawnMargin + size;
                     vx = (Math.random() - 0.5) * cfg.baseSpeed;
                     vy = -cfg.baseSpeed;
                     break;
-                case 3: // Left edge
-                    x = Math.min(-size, viewLeft - size);
-                    y = Math.random() * GAME_AREA_HEIGHT;
+                case 3: // Left edge - left of camera view
+                    x = camera.x - viewHalfW - spawnMargin - size;
+                    y = camera.y + (Math.random() - 0.5) * viewHalfH * 2;
                     vx = cfg.baseSpeed;
                     vy = (Math.random() - 0.5) * cfg.baseSpeed;
                     break;
             }
+
+            // Clamp to game area (but keep outside camera)
+            x = Math.max(-size * 2, Math.min(GAME_AREA_WIDTH + size * 2, x));
+            y = Math.max(-size * 2, Math.min(GAME_AREA_HEIGHT + size * 2, y));
             
             return {
                 x, y, vx, vy,
@@ -385,12 +446,14 @@
                 moveTimer: 60 + Math.random() * 120,
                 baseSpeed: cfg.baseSpeed,
                 aggroSpeed: cfg.aggroSpeed,
-                aggroRange: type === ENEMY_BOSS ? 300 : 200,
-                chargeRange: type === ENEMY_BOSS ? 250 : 180,
+                aggroRange: type === ENEMY_BOSS ? 400 : 280,
+                chargeRange: type === ENEMY_BOSS ? 300 : 220,
                 orbitRange: type === ENEMY_BOSS ? 80 : (type === ENEMY_BIG ? 60 : 45),
                 isAggro: false,
                 respawnTimer: 0,
                 dead: false,
+                spawnFadeIn: 1.0,  // Fade-in animation (1.0 = starting, counts down to 0)
+                spawnFadeDuration: 30, // 0.5 seconds at 60fps
                 isCharging: false,
                 chargeTime: 0,
                 inParryWindow: false,
@@ -406,7 +469,12 @@
                 laserAimAngle: 0,      // Current aim angle (with delay)
                 laserTargetAngle: 0,   // Target angle (instant to player)
                 laserFiring: false,
-                laserFireTimer: 0
+                laserFireTimer: 0,
+                laserRecoil: 0,        // Recoil force when firing
+                laserRecoilAngle: 0,   // Direction of recoil
+                // Visual bounce on hit
+                hitBounce: 0,          // Current bounce animation (0-1)
+                hitBounceType: 'melee' // 'melee' or 'gun' for different effects
             };
         }
 
@@ -426,19 +494,25 @@
             game.bossActive = true;
         }
 
-        // Check if boss is visible on screen
-        function isBossOnScreen(boss) {
+        // Check if enemy is visible on screen
+        function isEnemyOnScreen(enemy) {
             const viewHalfW = (VIEWPORT_WIDTH / 2) / camera.zoom;
             const viewHalfH = (VIEWPORT_HEIGHT / 2) / camera.zoom;
-            const dx = boss.x - camera.x;
-            const dy = boss.y - camera.y;
-            return Math.abs(dx) < viewHalfW + boss.size && Math.abs(dy) < viewHalfH + boss.size;
+            const dx = enemy.x - camera.x;
+            const dy = enemy.y - camera.y;
+            return Math.abs(dx) < viewHalfW + enemy.size && Math.abs(dy) < viewHalfH + enemy.size;
         }
 
-        // Update boss laser system
-        function updateBossLaser(enemy, distToPlayer, angleToPlayer, enemyTime) {
+        // Get laser config for enemy type
+        function getLaserConfig(enemy) {
+            return enemy.type === ENEMY_BOSS ? laserConfig.boss : laserConfig.big;
+        }
+
+        // Update laser system for ENEMY_BIG and ENEMY_BOSS
+        function updateEnemyLaser(enemy, distToPlayer, angleToPlayer, enemyTime) {
             const player = game.player;
             const inWitchTime = game.witchTime.active && !game.witchTime.circleWipe;
+            const config = getLaserConfig(enemy);
 
             // Don't do laser during witch time
             if (inWitchTime) {
@@ -451,15 +525,43 @@
             // Update firing state
             if (enemy.laserFiring) {
                 enemy.laserFireTimer -= enemyTime;
+
+                // Apply recoil movement (gradually decreases)
+                if (enemy.laserRecoil > 0) {
+                    const recoilMove = enemy.laserRecoil * 0.3;
+                    const newX = enemy.x + Math.cos(enemy.laserRecoilAngle) * recoilMove;
+                    const newY = enemy.y + Math.sin(enemy.laserRecoilAngle) * recoilMove;
+                    // Keep within game bounds
+                    enemy.x = Math.max(enemy.size, Math.min(GAME_AREA_WIDTH - enemy.size, newX));
+                    enemy.y = Math.max(enemy.size, Math.min(GAME_AREA_HEIGHT - enemy.size, newY));
+                    enemy.laserRecoil *= 0.85; // Decay
+                    if (enemy.laserRecoil < 0.5) enemy.laserRecoil = 0;
+
+                    // Spawn trail particles during recoil
+                    if (Math.random() < 0.5) {
+                        game.particles.push({
+                            x: enemy.x - Math.cos(enemy.laserRecoilAngle) * enemy.size * 0.3,
+                            y: enemy.y - Math.sin(enemy.laserRecoilAngle) * enemy.size * 0.3,
+                            vx: (Math.random() - 0.5) * 2,
+                            vy: (Math.random() - 0.5) * 2,
+                            life: 15 + Math.random() * 10,
+                            maxLife: 25,
+                            radius: 2 + Math.random() * 2,
+                            color: '#ffaa00'
+                        });
+                    }
+                }
+
                 if (enemy.laserFireTimer <= 0) {
                     enemy.laserFiring = false;
+                    enemy.laserRecoil = 0;
                 }
                 return;
             }
 
             // Check if should start/continue targeting
-            const onScreen = isBossOnScreen(enemy);
-            const inRange = distToPlayer < bossLaser.detectionRange;
+            const onScreen = isEnemyOnScreen(enemy);
+            const inRange = distToPlayer < laserConfig.getDetectionRange();
 
             if (enemy.laserCharging) {
                 // Already charging - check if player left range
@@ -476,15 +578,29 @@
                 let normalizedDiff = aimDiff;
                 while (normalizedDiff > Math.PI) normalizedDiff -= Math.PI * 2;
                 while (normalizedDiff < -Math.PI) normalizedDiff += Math.PI * 2;
-                // Aim catches up gradually - dashable but hard to walk away from
-                enemy.laserAimAngle += normalizedDiff * (1 / bossLaser.aimDelay) * enemyTime;
+                enemy.laserAimAngle += normalizedDiff * (1 / config.aimDelay) * enemyTime;
 
                 // Increment charge
                 enemy.laserChargeTime += enemyTime;
 
+                // Check if player is in the laser aim path (for auto-aim to this enemy)
+                checkLaserTargetingPlayer(enemy);
+
+                // Deflect check - can deflect anytime during charge if player is doing CHARGED melee
+                if (player.meleeFrame > 0 && player.meleeFrame < 12 && player.lastMeleeWasCharged) {
+                    const laserLength = 1500;
+                    const laserEndX = enemy.x + Math.cos(enemy.laserAimAngle) * laserLength;
+                    const laserEndY = enemy.y + Math.sin(enemy.laserAimAngle) * laserLength;
+                    const playerDist = pointToLineDistance(player.x, player.y, enemy.x, enemy.y, laserEndX, laserEndY);
+                    if (playerDist < 30 + player.radius) {
+                        deflectLaser(enemy);
+                        return;
+                    }
+                }
+
                 // Fire when charged
-                if (enemy.laserChargeTime >= bossLaser.chargeTime) {
-                    fireBossLaser(enemy);
+                if (enemy.laserChargeTime >= config.chargeTime) {
+                    fireEnemyLaser(enemy);
                 }
             } else {
                 // Not charging - check if should start
@@ -498,61 +614,90 @@
             }
         }
 
-        // Fire the boss laser
-        function fireBossLaser(enemy) {
+        // Check if laser is targeting player (for auto-aim assist)
+        function checkLaserTargetingPlayer(enemy) {
             const player = game.player;
+            const laserLength = 1500;
+            const laserEndX = enemy.x + Math.cos(enemy.laserAimAngle) * laserLength;
+            const laserEndY = enemy.y + Math.sin(enemy.laserAimAngle) * laserLength;
+            const playerDist = pointToLineDistance(player.x, player.y, enemy.x, enemy.y, laserEndX, laserEndY);
+
+            // If laser is close to player, set this enemy as the laser threat
+            if (playerDist < 50 + player.radius) {
+                if (!game.laserThreat || game.laserThreatTimer <= 0) {
+                    game.laserThreat = enemy;
+                    game.laserThreatTimer = 10; // Small delay to avoid stutter
+                }
+            }
+        }
+
+        // Fire the laser
+        function fireEnemyLaser(enemy) {
+            const player = game.player;
+            const config = getLaserConfig(enemy);
 
             enemy.laserCharging = false;
             enemy.laserChargeTime = 0;
             enemy.laserFiring = true;
-            enemy.laserFireTimer = bossLaser.fireDuration;
-            enemy.attackCooldown = 120; // Cooldown before next laser
+            enemy.laserFireTimer = config.fireDuration;
+            enemy.laserBlinkTimer = config.fireDuration; // For blink effect
+            enemy.attackCooldown = enemy.type === ENEMY_BOSS ? 150 : 90;
 
-            // Spawn particles from boss
-            for (let i = 0; i < 8; i++) {
-                const angle = enemy.laserAimAngle + (Math.random() - 0.5) * 0.5;
-                const speed = 3 + Math.random() * 3;
+            // Recoil - push enemy back opposite to laser direction
+            const recoilForce = enemy.type === ENEMY_BOSS ? 20 : 12;
+            enemy.laserRecoil = recoilForce; // Store for gradual movement
+            enemy.laserRecoilAngle = enemy.laserAimAngle + Math.PI; // Opposite direction
+
+            // Spawn particles from enemy (more particles for dramatic effect)
+            const particleCount = enemy.type === ENEMY_BOSS ? 20 : 10;
+            for (let i = 0; i < particleCount; i++) {
+                // Particles spray out from both sides of laser origin
+                const spreadAngle = enemy.laserAimAngle + (Math.random() - 0.5) * Math.PI;
+                const speed = 4 + Math.random() * 6;
                 game.particles.push({
-                    x: enemy.x,
-                    y: enemy.y,
-                    vx: Math.cos(angle) * speed,
-                    vy: Math.sin(angle) * speed,
-                    life: 20 + Math.random() * 15,
-                    maxLife: 35,
-                    radius: 3 + Math.random() * 2,
-                    color: '#ffff00'
+                    x: enemy.x + Math.cos(enemy.laserAimAngle) * enemy.size * 0.5,
+                    y: enemy.y + Math.sin(enemy.laserAimAngle) * enemy.size * 0.5,
+                    vx: Math.cos(spreadAngle) * speed,
+                    vy: Math.sin(spreadAngle) * speed,
+                    life: 25 + Math.random() * 20,
+                    maxLife: 45,
+                    radius: enemy.type === ENEMY_BOSS ? 4 + Math.random() * 4 : 2 + Math.random() * 3,
+                    color: Math.random() > 0.3 ? '#ffff00' : '#ffffff'
                 });
             }
 
             // Check if player is hit by laser
-            // Use a wide line from boss toward aim direction
-            const laserLength = 1500;  // Long enough to reach across screen
-            const laserWidth = 20;
-
-            // Check collision with line
+            const laserLength = 1500;
+            const laserWidth = enemy.type === ENEMY_BOSS ? 2 : 1.2; // 60% of previous (40% thinner)
             const laserEndX = enemy.x + Math.cos(enemy.laserAimAngle) * laserLength;
             const laserEndY = enemy.y + Math.sin(enemy.laserAimAngle) * laserLength;
-
-            // Point-to-line distance
             const playerDist = pointToLineDistance(player.x, player.y, enemy.x, enemy.y, laserEndX, laserEndY);
 
             if (playerDist < laserWidth + player.radius) {
-                // Check if player is attacking (melee deflect)
-                if (player.meleeFrame > 0 && player.meleeFrame < 10) {
-                    // DEFLECT! Activate witch time
-                    deflectBossLaser(enemy);
+                // Check if player is doing CHARGED melee (only charged melee can deflect)
+                if (player.meleeFrame > 0 && player.meleeFrame < 12 && player.lastMeleeWasCharged) {
+                    deflectLaser(enemy);
                 } else if (!player.isDashing && !player.isHurt) {
                     // Player hit by laser
-                    damagePlayer(enemy.x, enemy.y, true, false);
+                    damagePlayer(enemy.x, enemy.y, enemy.type === ENEMY_BOSS, enemy.type === ENEMY_BIG, true);
                 }
             }
 
-            game.screenShake = 8;
+            game.screenShake = enemy.type === ENEMY_BOSS ? 12 : 6;
         }
 
-        // Deflect the boss laser - triggers witch time
-        function deflectBossLaser(enemy) {
+        // Deflect laser - enemy fires, player deflects it to another target
+        function deflectLaser(enemy) {
             const player = game.player;
+            const config = getLaserConfig(enemy);
+            const isBoss = enemy.type === ENEMY_BOSS;
+
+            // Cancel the enemy's laser completely (the deflect visual handles it)
+            enemy.laserCharging = false;
+            enemy.laserChargeTime = 0;
+            enemy.laserFiring = false; // Don't show enemy laser, only deflect visual
+            enemy.laserFireTimer = 0;
+            enemy.attackCooldown = isBoss ? 150 : 90;
 
             // Find random visible enemy to redirect laser to
             let targetEnemy = null;
@@ -570,7 +715,7 @@
                 targetEnemy = visibleEnemies[Math.floor(Math.random() * visibleEnemies.length)];
             }
 
-            // Store deflect info for visual
+            // Store deflect info for visual (with laser color based on enemy type)
             game.laserDeflect = {
                 fromX: enemy.x,
                 fromY: enemy.y,
@@ -579,30 +724,29 @@
                 toX: targetEnemy ? targetEnemy.x : player.x + Math.cos(player.angle) * 200,
                 toY: targetEnemy ? targetEnemy.y : player.y + Math.sin(player.angle) * 200,
                 timer: 30,
-                targetEnemy: targetEnemy
+                targetEnemy: targetEnemy,
+                isBoss: isBoss, // For color/thickness
+                lineWidth: isBoss ? config.fireLineWidth : config.fireLineWidth
             };
 
-            // Reset witch time bar and activate
-            game.witchTimeCharge.charge = 0;
-            game.witchTimeCharge.ready = false;
+            // Brief time freeze (NOT witch time activation)
+            game.hitFreeze = 12;
 
-            // Activate witch time
-            activateWitchTimeManual();
-
-            // Damage the target enemy if exists
+            // Damage the target enemy if exists - high damage to one-shot most enemies
             if (targetEnemy) {
-                targetEnemy.health -= 3;
+                const deflectDamage = isBoss ? 15 : 8; // Enough to kill a big enemy (5 HP) in one hit
+                targetEnemy.health -= deflectDamage;
                 targetEnemy.hit = 15;
-                spawnParticles(targetEnemy.x, targetEnemy.y, '#ffff00', 15, 8);
+                spawnParticles(targetEnemy.x, targetEnemy.y, isBoss ? '#ffff00' : '#88aaff', 15, 8);
                 if (targetEnemy.health <= 0) {
                     killEnemy(targetEnemy, player.x, player.y, false);
                 }
             }
 
-            // Big visual feedback
-            game.screenShake = 15;
-            spawnShockwave(player.x, player.y, '#ffffff', 100);
-            spawnParticles(player.x, player.y, '#ffff00', 20, 6);
+            // Visual feedback
+            game.screenShake = isBoss ? 15 : 10;
+            spawnShockwave(player.x, player.y, '#ffffff', 80);
+            spawnParticles(player.x, player.y, isBoss ? '#ffff00' : '#88aaff', 15, 5);
         }
 
         // Helper: point to line distance
@@ -636,10 +780,31 @@
         
         function updateAutoAim() {
             const player = game.player;
-            
+
+            // Update laser threat timer
+            if (game.laserThreatTimer > 0) game.laserThreatTimer -= 1;
+            if (game.laserThreatTimer <= 0) game.laserThreat = null;
+
             // Decrement lock timer
             if (player.autoAimLockTimer > 0) player.autoAimLockTimer -= 1;
-            
+
+            // Update reticle animation and rotation
+            if (player.autoAimTarget && player.autoAimTarget.health > 0 && !player.autoAimTarget.dead) {
+                player.reticleAnim = Math.min(1, player.reticleAnim + 0.12); // Lock-in over ~8 frames
+                player.reticleRotation += 0.05; // Constant rotation speed
+            } else {
+                player.reticleAnim = 0;
+            }
+
+            // PRIORITY: If there's a laser threat, aim at it
+            if (game.laserThreat && game.laserThreat.health > 0 && !game.laserThreat.dead && game.laserThreat.laserCharging) {
+                const dx = game.laserThreat.x - player.x;
+                const dy = game.laserThreat.y - player.y;
+                player.angle = Math.atan2(dy, dx);
+                player.autoAimTarget = game.laserThreat;
+                return;
+            }
+
             // Check if current target is still valid
             if (player.autoAimTarget) {
                 const target = player.autoAimTarget;
@@ -648,7 +813,7 @@
                     player.autoAimLockTimer = 0;
                 }
             }
-            
+
             // If locked onto a target, keep it
             if (player.autoAimTarget && player.autoAimLockTimer > 0) {
                 const dx = player.autoAimTarget.x - player.x;
@@ -656,17 +821,21 @@
                 player.angle = Math.atan2(dy, dx);
                 return;
             }
-            
+
             // Find enemy at medium-long range for shooting (not closest, not farthest)
+            // Find enemy at medium-long range for shooting - ONLY if visible on screen
             // Prioritize enemies between 200-600 pixels away
             let bestTarget = null;
             let bestScore = Infinity;
             game.enemies.forEach(enemy => {
                 if (enemy.health <= 0 || enemy.dead) return;
+                // Only target enemies visible on screen
+                if (!isEnemyOnScreen(enemy)) return;
+
                 const dx = enemy.x - player.x;
                 const dy = enemy.y - player.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                
+
                 // Scoring: prefer enemies at medium-long range (200-600px)
                 // Closer than 200: less priority
                 // 200-600: ideal range
@@ -679,7 +848,7 @@
                 } else {
                     score = 400 + (dist - 600); // Deprioritize very far enemies
                 }
-                
+
                 if (score < bestScore) {
                     bestScore = score;
                     bestTarget = enemy;
@@ -691,6 +860,7 @@
                 if (bestTarget !== player.autoAimTarget) {
                     player.autoAimTarget = bestTarget;
                     player.autoAimLockTimer = 30; // Lock for 0.5 seconds
+                    player.reticleAnim = 0; // Reset lock-in animation
                 }
                 const dx = bestTarget.x - player.x;
                 const dy = bestTarget.y - player.y;
@@ -735,6 +905,27 @@
                 if (dist < 200 && dist < bestDist) {
                     bestDist = dist;
                     bestTarget = { enemy, angleToEnemy, dist };
+                }
+            });
+            return bestTarget;
+        }
+
+        // Find enemy charging laser nearby (for witch time activation)
+        function findLaserChargingEnemy() {
+            const player = game.player;
+            let bestTarget = null;
+            let bestDist = Infinity;
+            game.enemies.forEach(enemy => {
+                if (enemy.health <= 0 || enemy.dead) return;
+                // Only enemies charging laser (not yet firing)
+                if (!enemy.laserCharging || enemy.laserFiring) return;
+                const dx = enemy.x - player.x;
+                const dy = enemy.y - player.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                // Generous range for laser parry (larger than melee parry)
+                if (dist < 350 && dist < bestDist) {
+                    bestDist = dist;
+                    bestTarget = { enemy, dist };
                 }
             });
             return bestTarget;
@@ -1030,6 +1221,7 @@
             // Restore witch time duration on kill
             if (game.witchTime.active && !game.witchTime.circleWipe) {
                 game.witchTime.timer = Math.min(game.witchTime.maxTime, game.witchTime.timer + game.witchTime.killTimeBonus);
+                game.witchTime.rechargeFlash = 20; // Flash the bar
             }
             if (useSlashEffect && game.slashDeaths.length < 15) {
                 // Radial slash lines pointing towards player (from enemy to player)
@@ -1047,7 +1239,9 @@
         function addXP(enemyType) {
             const xpGain = xpSystem.xpPerKill[enemyType] || 10;
             xpSystem.xp += xpGain;
-            
+            // Flash on XP gain
+            xpSystem.hitFlash = 15;
+
             if (xpSystem.xp >= xpSystem.xpToNext) {
                 levelUp();
             }
@@ -1057,7 +1251,8 @@
             xpSystem.level++;
             xpSystem.xp = Math.max(0, xpSystem.xp - xpSystem.xpToNext);
             xpSystem.xpToNext = Math.floor(xpSystem.xpToNext * 1.5);
-            
+            xpSystem.levelUpFlash = 120; // Flash for 2 seconds furiously
+
             // Start slot machine
             startSlotMachine();
         }
@@ -1090,29 +1285,49 @@
             if (powerUps[type] === 0) {
                 powerUpOrder.push(type);
             }
-            
+
             powerUps[type]++;
-            
-            // Recalculate stats
-            game.player.speed = game.player.baseSpeed + (powerUps.speed * powerUpConfig.speed.bonus);
-            meleeAttack.damage = meleeAttack.baseDamage + (powerUps.meleeDamage * powerUpConfig.meleeDamage.bonus);
-            chargedMeleeAttack.damage = chargedMeleeAttack.baseDamage + (powerUps.meleeDamage * powerUpConfig.meleeDamage.bonus * 2);
-            dashMeleeAttack.damage = dashMeleeAttack.baseDamage + (powerUps.meleeDamage * powerUpConfig.meleeDamage.bonus * 1.5);
-            
-            // Spike upgrades (size and damage)
-            dashMeleeAttack.width = dashMeleeAttack.baseWidth + (powerUps.spikeDamage * 4);
-            dashMeleeAttack.length = dashMeleeAttack.baseLength + (powerUps.spikeDamage * 25);
-            dashMeleeAttack.damage = dashMeleeAttack.baseDamage + (powerUps.spikeDamage * powerUpConfig.spikeDamage.bonus);
-            
-            // Charge speed upgrade
-            game.player.meleeChargeMax = Math.max(30, game.player.baseMeleeChargeMax - (powerUps.chargeSpeed * powerUpConfig.chargeSpeed.bonus));
-            
-            // Apply gun upgrades to all weapons
+
+            // Trigger particle explosion for this power-up (will be spawned in render)
+            if (!game.powerUpFlash) game.powerUpFlash = {};
+            game.powerUpFlash[type] = 30; // Short blink
+            game.powerUpParticles = game.powerUpParticles || {};
+            game.powerUpParticles[type] = true; // Mark to spawn particles on next render
+
+            // Recalculate all stats based on new powerup system
+            // Each powerup improves 2 stats
+
+            // MELEE: Damage + Sword Size (range)
+            const meleeBonus = powerUps.melee;
+            meleeAttack.damage = meleeAttack.baseDamage + (meleeBonus * 0.4);
+            meleeAttack.range = meleeAttack.baseRange + (meleeBonus * 8);
+            chargedMeleeAttack.damage = chargedMeleeAttack.baseDamage + (meleeBonus * 0.8);
+            chargedMeleeAttack.range = chargedMeleeAttack.baseRange + (meleeBonus * 15);
+
+            // GUN: Damage + ROF
+            const gunBonus = powerUps.gun;
             Object.keys(weapons).forEach(wKey => {
                 const w = weapons[wKey];
-                w.damage = w.baseDamage + (powerUps.gunDamage * powerUpConfig.gunDamage.bonus);
-                w.fireRate = Math.max(30, w.baseFireRate - (powerUps.fireRate * powerUpConfig.fireRate.bonus));
+                w.damage = w.baseDamage + (gunBonus * 0.15);
+                w.fireRate = Math.max(50, w.baseFireRate - (gunBonus * 70));
             });
+
+            // DASH: Speed + Distance (duration)
+            const dashBonus = powerUps.dash;
+            game.player.dashSpeed = game.player.baseDashSpeed + (dashBonus * 4);
+            game.player.dashDurationMax = game.player.baseDashDuration + (dashBonus * 5);
+
+            // WITCH TIME: Duration (main) + Enemy Slowdown (subtle)
+            const wtBonus = powerUps.witchTime;
+            // Duration increases significantly with each level
+            game.witchTime.maxTime = game.witchTime.baseMaxTime + (wtBonus * 50);
+            // Slowdown gets slightly more intense (smaller improvement)
+            game.witchTime.enemySpeed = Math.max(0.05, game.witchTime.baseEnemySpeed - (wtBonus * 0.01));
+
+            // REGEN: HP Regen + Charge Speed
+            const regenBonus = powerUps.regen;
+            game.player.regenRate = game.player.baseRegenRate + (regenBonus * 0.2);
+            game.player.meleeChargeMax = Math.max(25, game.player.baseMeleeChargeMax - (regenBonus * 6));
         }
         
         function cycleWeapon() {
@@ -1161,14 +1376,29 @@
             enemy.hasBlinked = false;
         }
 
-        function damagePlayer(fromX, fromY, isBossAttack = false, isBigAttack = false) {
+        function damagePlayer(fromX, fromY, isBossAttack = false, isBigAttack = false, isLaser = false) {
             const player = game.player;
             if (player.isParrying) return;
+
+            // Calculate damage based on attack type
+            let damage = 10; // Normal enemy melee
+            if (isLaser) {
+                damage = isBossAttack ? 25 : 15; // Boss laser = 25, Big enemy laser = 15
+            } else if (isBossAttack) {
+                damage = 30; // Boss melee
+            } else if (isBigAttack) {
+                damage = 20; // Big enemy melee
+            }
+
+            // Apply damage
+            player.health -= damage;
+            player.lastDamageTime = 0; // Reset regen timer
+
             player.isHurt = true;
             player.hurtTimer = 45;
             player.cantAttackTimer = 20;
             const angle = Math.atan2(player.y - fromY, player.x - fromX);
-            if (isBossAttack) {
+            if (isBossAttack && !isLaser) {
                 player.isKnockedBack = true;
                 player.knockbackTimer = bossAttack.knockbackDuration;
                 player.vx = Math.cos(angle) * bossAttack.knockbackForce;
@@ -1177,7 +1407,7 @@
                 // Boss shockwave effect
                 spawnShockwave(fromX, fromY, '#ffaa00', 80);
                 spawnParticles(fromX, fromY, '#ffaa00', 20, 8);
-            } else if (isBigAttack) {
+            } else if (isBigAttack && !isLaser) {
                 player.isKnockedBack = true;
                 player.knockbackTimer = 25; // Shorter than boss
                 player.vx = Math.cos(angle) * 15; // Less force than boss
@@ -1186,23 +1416,198 @@
                 // Big enemy shockwave effect
                 spawnShockwave(fromX, fromY, '#5a6fd6', 60);
                 spawnParticles(fromX, fromY, '#5a6fd6', 15, 6);
+            } else if (isLaser) {
+                // Laser knockback (lighter)
+                player.vx = Math.cos(angle) * 5;
+                player.vy = Math.sin(angle) * 5;
+                game.screenShake = isBossAttack ? 12 : 8;
             } else {
                 player.vx = Math.cos(angle) * 8;
                 player.vy = Math.sin(angle) * 8;
                 game.screenShake = 10;
             }
             spawnParticles(player.x, player.y, '#ff0000', 15, 6);
+
+            // Check for death
+            if (player.health <= 0) {
+                player.health = 0;
+                startPlayerDeath();
+            }
         }
 
         function addWitchTimeCharge() {
             // Only charge when not in witch time and can charge
             if (game.witchTimeCharge.canCharge && !game.witchTime.active) {
+                const wasReady = game.witchTimeCharge.ready;
                 game.witchTimeCharge.charge += game.witchTimeCharge.chargePerHit;
+                // Flash every time charge is added (same as when full)
+                game.witchTimeCharge.hitFlash = 20;
                 if (game.witchTimeCharge.charge >= game.witchTimeCharge.maxCharge) {
                     game.witchTimeCharge.charge = game.witchTimeCharge.maxCharge;
                     game.witchTimeCharge.ready = true;
+                    // Start longer flash when just filled
+                    if (!wasReady) {
+                        game.witchTimeCharge.justFilledFlash = 120; // 2 seconds of flash
+                    }
                 }
             }
+        }
+
+        // Player death system - simplified
+        function startPlayerDeath() {
+            const death = game.death;
+            death.active = true;
+            death.phase = 0;
+            death.timer = 0;
+            death.fadeAlpha = 1; // Instant black
+            death.textShakeTimer = 60;
+            death.canRestart = false;
+            death.frozen = true;
+
+            // Reset slow motion
+            game.slowMotion = 1;
+            game.screenShake = 0;
+        }
+
+        function updatePlayerDeath() {
+            const death = game.death;
+            if (!death.active) return false;
+
+            death.timer++;
+
+            switch (death.phase) {
+                case 0: // Instant black screen with YOU DIED
+                    // Immediately show black screen
+                    death.fadeAlpha = 1;
+                    if (death.textShakeTimer > 0) death.textShakeTimer--;
+                    if (death.timer >= 60) {
+                        death.canRestart = true;
+                    }
+                    break;
+
+                case 1: // After pressing restart - reset and fade in
+                    if (death.timer === 1) {
+                        resetGame();
+                        camera.targetZoom = camera.normalZoom;
+                    }
+                    death.fadeAlpha = Math.max(0, 1 - death.timer / 30);
+                    if (death.timer >= 30) {
+                        death.active = false;
+                        death.frozen = false;
+                        game.slowMotion = 1;
+                    }
+                    break;
+            }
+
+            return true;
+        }
+
+        function resetGame() {
+            const player = game.player;
+            // Reset player
+            player.x = GAME_AREA_WIDTH / 2;
+            player.y = GAME_AREA_HEIGHT / 2;
+            player.vx = 0;
+            player.vy = 0;
+            player.health = 50; // Start with half HP
+            player.lastDamageTime = 0;
+            player.isHurt = false;
+            player.hurtTimer = 0;
+            player.isDashing = false;
+            player.dashCooldown = 0;
+            player.isKnockedBack = false;
+            player.isGrounded = false;
+            player.meleeFrame = 0;
+            player.isChargingMelee = false;
+            player.meleeChargeTime = 0;
+            player.chargeReady = false;
+
+            // Reset witch time
+            game.witchTime.active = false;
+            game.witchTime.circleWipe = null;
+            game.witchTime.perfectClear = false;
+            game.witchTimeCharge.charge = 0;
+            game.witchTimeCharge.ready = false;
+            game.witchTimeCharge.canCharge = true;
+            game.witchTimeCharge.justFilledFlash = 0;
+
+            // Reset XP and level
+            xpSystem.xp = 0;
+            xpSystem.level = 1;
+            xpSystem.xpToNext = 100;
+
+            // Reset power-ups
+            Object.keys(powerUps).forEach(k => powerUps[k] = 0);
+            powerUpOrder.length = 0;
+
+            // Reset stats to base
+            player.speed = player.baseSpeed;
+            player.regenRate = player.baseRegenRate;
+            player.meleeChargeMax = player.baseMeleeChargeMax;
+            player.dashSpeed = player.baseDashSpeed;
+            player.dashDurationMax = player.baseDashDuration;
+            meleeAttack.damage = meleeAttack.baseDamage;
+            chargedMeleeAttack.damage = chargedMeleeAttack.baseDamage;
+            dashMeleeAttack.damage = dashMeleeAttack.baseDamage;
+            dashMeleeAttack.width = dashMeleeAttack.baseWidth;
+            dashMeleeAttack.length = dashMeleeAttack.baseLength;
+            Object.keys(weapons).forEach(wKey => {
+                const w = weapons[wKey];
+                w.damage = w.baseDamage;
+                w.fireRate = w.baseFireRate;
+            });
+
+            // Reset slot machine
+            slotMachine.active = false;
+
+            // Reset weapon
+            currentWeaponIndex = 0;
+            game.weapon = weapons[weaponOrder[0]];
+            weaponSwitchTimer = 0;
+
+            // Reset enemies
+            initEnemies();
+
+            // Clear particles and effects
+            game.particles = [];
+            game.dustParticles = [];
+            game.shockwaves = [];
+            game.slashEffects = [];
+            game.uiParticles = [];
+            game.bullets = [];
+            game.ghostTrails = [];
+            game.powerUpFlash = {};
+            xpSystem.levelUpFlash = 0;
+
+            // Reset camera
+            camera.x = player.x;
+            camera.y = player.y;
+            camera.targetZoom = camera.normalZoom;
+            camera.zoom = camera.normalZoom;
+
+            game.slowMotion = 1;
+            game.violetFilter = 0;
+
+            // Death state is reset by updatePlayerDeath when phase 4 completes
+            // But set active = false here for safety
+            game.death.active = false;
+            game.death.frozen = false;
+        }
+
+        function checkRestartInput(gamepad) {
+            // Check keyboard
+            if (Object.values(keysJustPressed).some(v => v)) {
+                return true;
+            }
+            // Check gamepad
+            if (gamepad) {
+                for (let i = 0; i < gamepad.buttons.length; i++) {
+                    if (buttonJustPressed(gamepad.buttons, i)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         function checkThrustHit(enemy, playerX, playerY, attackAngle, attackLength, attackWidth, attackOffset, damage, knockback) {
@@ -1221,6 +1626,12 @@
                 enemy.health -= finalDamage;
                 enemy.hit = 15;
                 stunEnemy(enemy);
+                // Cancel laser charging/targeting if hit
+                if (enemy.laserCharging) {
+                    enemy.laserCharging = false;
+                    enemy.laserChargeTime = 0;
+                    enemy.attackCooldown = 90; // Reset cooldown like melee attack
+                }
                 enemy.x += Math.cos(attackAngle) * knockback;
                 enemy.y += Math.sin(attackAngle) * knockback;
                 addWitchTimeCharge();
@@ -1246,6 +1657,12 @@
                     enemy.health -= finalDamage;
                     enemy.hit = 15;
                     stunEnemy(enemy);
+                    // Cancel laser charging/targeting if hit
+                    if (enemy.laserCharging) {
+                        enemy.laserCharging = false;
+                        enemy.laserChargeTime = 0;
+                        enemy.attackCooldown = 90;
+                    }
                     enemy.x += Math.cos(angle) * knockback;
                     enemy.y += Math.sin(angle) * knockback;
                     addWitchTimeCharge();
@@ -1272,7 +1689,15 @@
                     const finalDamage = inWitchTime ? damage * 2 : damage;
                     enemy.health -= finalDamage;
                     enemy.hit = 15;
+                    enemy.hitBounce = 1.0;  // Start bounce animation
+                    enemy.hitBounceType = 'melee';
                     stunEnemy(enemy);
+                    // Cancel laser charging/targeting if hit
+                    if (enemy.laserCharging) {
+                        enemy.laserCharging = false;
+                        enemy.laserChargeTime = 0;
+                        enemy.attackCooldown = 90;
+                    }
                     const knockAngle = Math.atan2(dy, dx);
                     enemy.x += Math.cos(knockAngle) * Math.min(knockback, dist * 0.4);
                     enemy.y += Math.sin(knockAngle) * Math.min(knockback, dist * 0.4);
@@ -1592,8 +2017,9 @@
             // Restore witch time on kill
             if (game.witchTime.active && !game.witchTime.circleWipe) {
                 game.witchTime.timer = Math.min(game.witchTime.maxTime, game.witchTime.timer + game.witchTime.killTimeBonus);
+                game.witchTime.rechargeFlash = 20; // Flash the bar
             }
-            
+
             if (isEnemy) {
                 // Kill the enemy
                 target.dead = true;
@@ -1689,7 +2115,7 @@
             player.isParrying = false;
             player.parryTarget = null;
             player.parryTargets = [];
-            player.dashSpeed = 22;
+            player.dashSpeed = player.baseDashSpeed;
         }
 
         function chargedDashMeleeAttack() {
@@ -1763,8 +2189,9 @@
             const attack = isCharged ? chargedMeleeAttack : meleeAttack;
             player.meleeFrame = attack.duration;
             player.meleeCooldown = attack.cooldown;
+            player.lastMeleeWasCharged = isCharged; // Track for laser deflect
             
-            // Find closest enemy for melee targeting
+            // Find closest enemy for melee targeting (priority: live enemies > suspended pieces)
             let closestEnemy = null;
             let closestDist = Infinity;
             game.enemies.forEach(enemy => {
@@ -1777,28 +2204,317 @@
                     closestEnemy = enemy;
                 }
             });
+
+            // During witch time, increase melee range and arc. Outside witch time, reduce range slightly.
+            const inWitchTime = game.witchTime.active && !game.witchTime.circleWipe;
+            const witchTimeRangeBonus = inWitchTime ? 40 : -15;  // +40 range in WT, -15 outside
+            const witchTimeArcBonus = inWitchTime ? 0.3 : 0;   // +0.3 rad arc in WT
+            const effectiveRange = attack.range + witchTimeRangeBonus;
+            const effectiveArc = attack.arc + witchTimeArcBonus;
+
+            // If no live enemies nearby, check for suspended pieces during witch time
+            let meleeAngle = player.angle;
+            if (closestEnemy) {
+                meleeAngle = Math.atan2(closestEnemy.y - player.y, closestEnemy.x - player.x);
+            } else if (inWitchTime) {
+                // Find closest cuttable piece (suspended or half) to auto-aim at
+                let closestPieceDist = Infinity;
+                let closestPiecePos = null;
+                const autoAimRange = effectiveRange + 100; // Much larger detection range for auto-aim
+
+                game.slashDeaths.forEach(death => {
+                    // Handle 'flash', 'split' or 'suspended' phase (two halves together)
+                    if ((death.phase === 'flash' || death.phase === 'split' || death.phase === 'suspended') && death.size >= 8) {
+                        const perpAngle = death.slashAngle + Math.PI / 2;
+                        const sep = death.finalSep || death.separation;
+
+                        // Check both halves
+                        const halves = [
+                            { x: death.x + Math.cos(perpAngle) * sep, y: death.y + Math.sin(perpAngle) * sep },
+                            { x: death.x - Math.cos(perpAngle) * sep, y: death.y - Math.sin(perpAngle) * sep }
+                        ];
+
+                        halves.forEach(half => {
+                            const dx = half.x - player.x;
+                            const dy = half.y - player.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            if (dist < closestPieceDist && dist < autoAimRange) {
+                                closestPieceDist = dist;
+                                closestPiecePos = half;
+                            }
+                        });
+                    }
+                    // Handle 'half' phase (single half that can still be cut)
+                    else if (death.phase === 'half' && death.size >= 8) {
+                        const dx = death.x - player.x;
+                        const dy = death.y - player.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < closestPieceDist && dist < autoAimRange) {
+                            closestPieceDist = dist;
+                            closestPiecePos = { x: death.x, y: death.y };
+                        }
+                    }
+                });
+
+                if (closestPiecePos) {
+                    meleeAngle = Math.atan2(closestPiecePos.y - player.y, closestPiecePos.x - player.x);
+                }
+            }
             
-            // Use closest enemy angle for melee, fallback to player.angle if no enemies
-            const meleeAngle = closestEnemy ? Math.atan2(closestEnemy.y - player.y, closestEnemy.x - player.x) : player.angle;
-            
-            createSlashEffect(attack, meleeAngle, player.x, player.y, true, isCharged);
+            // Create slash effect with WT bonus (visual also bigger)
+            const slashAttack = inWitchTime ? { ...attack, arc: effectiveArc, range: effectiveRange } : attack;
+            createSlashEffect(slashAttack, meleeAngle, player.x, player.y, true, isCharged);
             let hitSomething = false;
-            
-            // Hit enemies - same behavior in and out of witch time
+
+            // Hit enemies - use effective range/arc during witch time
             game.enemies.forEach(enemy => {
                 if (enemy.health <= 0 || enemy.dead) return;
-                const result = checkArcHit(enemy, player.x, player.y, meleeAngle, attack.arc, attack.range, attack.damage, attack.knockback);
+                const result = checkArcHit(enemy, player.x, player.y, meleeAngle, effectiveArc, effectiveRange, attack.damage, attack.knockback);
                 if (result.hit) {
                     hitSomething = true;
                     spawnParticles(enemy.x, enemy.y, attack.color, isCharged ? 20 : 12, isCharged ? 10 : 6);
                     if (enemy.health <= 0) killEnemy(enemy, player.x, player.y);
                 }
             });
-            
-            if (hitSomething) { 
+
+            // During witch time: re-cut suspended enemy pieces AND single halves
+            // For pieces: use CIRCULAR hit area (no arc check) - makes cutting much easier
+            const pieceHitRange = effectiveRange + (isCharged ? 40 : 20);
+
+            if (game.witchTime.active) {
+                const piecesToAdd = [];
+                game.slashDeaths = game.slashDeaths.filter(death => {
+                    // Handle 'flash' and 'split' phases - can cut during appearance animation!
+                    if ((death.phase === 'flash' || death.phase === 'split') && death.size >= 8) {
+                        const perpAngle = death.slashAngle + Math.PI / 2;
+                        const sep = death.separation;
+
+                        // Calculate positions of both halves
+                        const half1X = death.x + Math.cos(perpAngle) * sep;
+                        const half1Y = death.y + Math.sin(perpAngle) * sep;
+                        const half2X = death.x - Math.cos(perpAngle) * sep;
+                        const half2Y = death.y - Math.sin(perpAngle) * sep;
+
+                        // Check which half (if any) the melee hits - CIRCULAR hit area (no arc check)
+                        let hitHalf = -1;
+                        let hitX, hitY;
+                        const hitRange = pieceHitRange + death.size;
+
+                        for (let h = 0; h < 2; h++) {
+                            const hx = h === 0 ? half1X : half2X;
+                            const hy = h === 0 ? half1Y : half2Y;
+
+                            const dx = hx - player.x;
+                            const dy = hy - player.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+
+                            // Only distance check - full 360 degree hit area for pieces
+                            if (dist < hitRange) {
+                                hitHalf = h;
+                                hitX = hx;
+                                hitY = hy;
+                                break;
+                            }
+                        }
+
+                        if (hitHalf >= 0) {
+                            // Hit during split! Create 2 quarter pieces
+                            const newSize = death.size * 0.55;
+                            const newSlashAngle = meleeAngle;
+                            const newPerpAngle = newSlashAngle + Math.PI / 2;
+
+                            if (newSize >= 8) {
+                                for (let i = 0; i < 2; i++) {
+                                    const side = i === 0 ? 1 : -1;
+                                    piecesToAdd.push({
+                                        x: hitX + Math.cos(newPerpAngle) * 8 * side,
+                                        y: hitY + Math.sin(newPerpAngle) * 8 * side,
+                                        size: newSize,
+                                        type: death.type,
+                                        color: death.color,
+                                        slashAngle: newSlashAngle,
+                                        cutSide: side,
+                                        phase: 'quarter',
+                                        timer: 0,
+                                        vx: Math.cos(newPerpAngle) * 2 * side,
+                                        vy: Math.sin(newPerpAngle) * 2 * side
+                                    });
+                                }
+                            } else {
+                                spawnParticles(hitX, hitY, death.color, 8, 4);
+                            }
+
+                            // Keep the other half as cuttable
+                            const otherX = hitHalf === 0 ? half2X : half1X;
+                            const otherY = hitHalf === 0 ? half2Y : half1Y;
+                            const otherSide = hitHalf === 0 ? -1 : 1;
+                            piecesToAdd.push({
+                                x: otherX,
+                                y: otherY,
+                                size: death.size,
+                                type: death.type,
+                                color: death.color,
+                                slashAngle: death.slashAngle,
+                                cutSide: otherSide,
+                                phase: 'half',
+                                timer: 0,
+                                vx: 0, vy: 0
+                            });
+
+                            spawnParticles(hitX, hitY, death.color, 10, 5);
+                            spawnParticles(hitX, hitY, '#ffffff', 6, 3);
+                            game.screenShake = Math.max(game.screenShake, 5);
+                            hitSomething = true;
+                            return false;
+                        }
+                        return true;
+                    }
+
+                    // Handle 'suspended' phase (two halves together)
+                    if (death.phase === 'suspended' && death.size >= 8) {
+                        // The suspended slashDeath has two halves at fixed positions
+                        const perpAngle = death.slashAngle + Math.PI / 2;
+                        const sep = death.finalSep || death.separation;
+
+                        // Calculate positions of both halves
+                        const half1X = death.x + Math.cos(perpAngle) * sep;
+                        const half1Y = death.y + Math.sin(perpAngle) * sep;
+                        const half2X = death.x - Math.cos(perpAngle) * sep;
+                        const half2Y = death.y - Math.sin(perpAngle) * sep;
+
+                        // Check which half (if any) the melee hits - CIRCULAR hit area (no arc check)
+                        let hitHalf = -1;
+                        let hitX, hitY;
+                        const hitRange = pieceHitRange + death.size;
+
+                        for (let h = 0; h < 2; h++) {
+                            const hx = h === 0 ? half1X : half2X;
+                            const hy = h === 0 ? half1Y : half2Y;
+
+                            const dx = hx - player.x;
+                            const dy = hy - player.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+
+                            // Only distance check - full 360 degree hit area for pieces
+                            if (dist < hitRange) {
+                                hitHalf = h;
+                                hitX = hx;
+                                hitY = hy;
+                                break;
+                            }
+                        }
+
+                        if (hitHalf >= 0) {
+                            // Hit a half! Create 2 quarter pieces from this half
+                            const newSize = death.size * 0.55;
+                            const newSlashAngle = meleeAngle;
+                            const newPerpAngle = newSlashAngle + Math.PI / 2;
+
+                            // Create 2 quarter pieces flying apart
+                            if (newSize >= 8) {
+                                for (let i = 0; i < 2; i++) {
+                                    const side = i === 0 ? 1 : -1;
+                                    piecesToAdd.push({
+                                        x: hitX + Math.cos(newPerpAngle) * 8 * side,
+                                        y: hitY + Math.sin(newPerpAngle) * 8 * side,
+                                        size: newSize,
+                                        type: death.type,
+                                        color: death.color,
+                                        slashAngle: newSlashAngle,
+                                        cutSide: side,
+                                        phase: 'quarter', // Mark as quarter (cannot be cut again)
+                                        timer: 0,
+                                        vx: Math.cos(newPerpAngle) * 2 * side,
+                                        vy: Math.sin(newPerpAngle) * 2 * side
+                                    });
+                                }
+                            } else {
+                                spawnParticles(hitX, hitY, death.color, 8, 4);
+                            }
+
+                            // Keep the other half as a cuttable 'half' piece
+                            const otherX = hitHalf === 0 ? half2X : half1X;
+                            const otherY = hitHalf === 0 ? half2Y : half1Y;
+                            const otherSide = hitHalf === 0 ? -1 : 1;
+                            piecesToAdd.push({
+                                x: otherX,
+                                y: otherY,
+                                size: death.size,
+                                type: death.type,
+                                color: death.color,
+                                slashAngle: death.slashAngle,
+                                cutSide: otherSide,
+                                phase: 'half', // Single half - can still be cut into quarters
+                                timer: 0,
+                                vx: 0, vy: 0
+                            });
+
+                            // Effects
+                            spawnParticles(hitX, hitY, death.color, 10, 5);
+                            spawnParticles(hitX, hitY, '#ffffff', 6, 3);
+                            game.screenShake = Math.max(game.screenShake, 5);
+                            hitSomething = true;
+                            return false; // Remove original
+                        }
+                        return true;
+                    }
+
+                    // Handle 'half' phase (single half that can be cut into quarters)
+                    if (death.phase === 'half' && death.size >= 8) {
+                        const dx = death.x - player.x;
+                        const dy = death.y - player.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const hitRange = pieceHitRange + death.size;
+
+                        // CIRCULAR hit area - only distance check, no arc (full 360 degrees)
+                        if (dist < hitRange) {
+                            // Cut this half into 2 quarters
+                            const newSize = death.size * 0.55;
+                            const newSlashAngle = meleeAngle;
+                            const newPerpAngle = newSlashAngle + Math.PI / 2;
+
+                            if (newSize >= 8) {
+                                for (let i = 0; i < 2; i++) {
+                                    const side = i === 0 ? 1 : -1;
+                                    piecesToAdd.push({
+                                        x: death.x + Math.cos(newPerpAngle) * 8 * side,
+                                        y: death.y + Math.sin(newPerpAngle) * 8 * side,
+                                        size: newSize,
+                                        type: death.type,
+                                        color: death.color,
+                                        slashAngle: newSlashAngle,
+                                        cutSide: side,
+                                        phase: 'quarter', // Mark as quarter (cannot be cut again)
+                                        timer: 0,
+                                        vx: Math.cos(newPerpAngle) * 2 * side,
+                                        vy: Math.sin(newPerpAngle) * 2 * side
+                                    });
+                                }
+                            } else {
+                                spawnParticles(death.x, death.y, death.color, 8, 4);
+                            }
+
+                            // Effects
+                            spawnParticles(death.x, death.y, death.color, 10, 5);
+                            spawnParticles(death.x, death.y, '#ffffff', 6, 3);
+                            game.screenShake = Math.max(game.screenShake, 5);
+                            hitSomething = true;
+                            return false; // Remove original half
+                        }
+                        return true;
+                    }
+
+                    return true;
+                });
+
+                // Add new pieces
+                piecesToAdd.forEach(p => game.slashDeaths.push(p));
+            }
+
+            if (hitSomething) {
                 // Same freeze behavior in and out of witch time
-                game.hitFreeze = isCharged ? 15 : 6; 
-                game.screenShake = isCharged ? 12 : 6; 
+                game.hitFreeze = isCharged ? 15 : 6;
+                game.screenShake = isCharged ? 12 : 6;
             }
         }
 
@@ -1829,13 +2545,18 @@
         function shoot() {
             const player = game.player;
             if (player.cantAttackTimer > 0 || player.isKnockedBack || player.isGrounded) return;
+
+            // Only shoot if there's a visible target (autoAimTarget is set and on screen)
+            if (!player.autoAimTarget || !isEnemyOnScreen(player.autoAimTarget)) return;
+
             const now = Date.now();
             if (now - game.lastShot < game.weapon.fireRate) return;
             game.lastShot = now;
-            
-            // Use player.angle directly - autoaim already set it
-            const aimAngle = player.angle;
-            
+
+            // Calculate aim angle directly toward autoAimTarget (independent of melee direction)
+            const target = player.autoAimTarget;
+            const aimAngle = Math.atan2(target.y - player.y, target.x - player.x);
+
             // Fire multiple bullets for shotgun
             const bulletsToFire = game.weapon.bulletsPerShot || 1;
             for (let i = 0; i < bulletsToFire; i++) {
@@ -1871,16 +2592,39 @@
             if (player.isDashing) spawnDust(player.x, player.y, player.dashAngle);
             
             let dashAngle = game.hasMoveInput ? game.currentMoveAngle : player.angle;
-            
-            // Only try to parry if witch time bar is full
-            const parryTarget = game.witchTimeCharge.ready ? findParryTarget(dashAngle) : null;
-            
-            if (parryTarget) {
-                startParry(parryTarget);
-                return;
+
+            // Check for parry targets (enemies in parryWindow - charging melee attack)
+            if (game.witchTimeCharge.ready) {
+                const parryTarget = findParryTarget(dashAngle);
+                if (parryTarget) {
+                    startParry(parryTarget);
+                    return;
+                }
+
+                // Also check for enemies charging laser
+                const laserTarget = findLaserChargingEnemy();
+                if (laserTarget) {
+                    // Cancel the enemy's laser
+                    laserTarget.enemy.laserCharging = false;
+                    laserTarget.enemy.laserChargeTime = 0;
+                    laserTarget.enemy.isStunned = true;
+                    laserTarget.enemy.stunTimer = 120;
+
+                    // Activate witch time
+                    activateWitchTimeManual();
+
+                    // Perform the dash as well
+                    player.isDashing = true;
+                    player.dashDuration = 25;
+                    player.dashAngle = dashAngle;
+                    player.vx = Math.cos(player.dashAngle) * 20;
+                    player.vy = Math.sin(player.dashAngle) * 20;
+                    spawnDust(player.x, player.y, player.dashAngle);
+                    return;
+                }
             }
-            
-            // Normal dash (either bar not ready or no parry target)
+
+            // Normal dash
             player.isDashing = true;
             player.dashDuration = 30;
             player.dashCooldown = 35;
@@ -1890,7 +2634,7 @@
             
             const currentSpeed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
             const momentumBonus = Math.min(currentSpeed * 0.5, 8);
-            player.dashSpeed = 22 + momentumBonus;
+            player.dashSpeed = player.baseDashSpeed + momentumBonus;
             player.dashMomentum = player.dashSpeed;
             
             player.vx = Math.cos(player.dashAngle) * player.dashSpeed;
@@ -1937,28 +2681,65 @@
         function update(gamepad) {
             // Update keyboard state at start of frame
             updateKeyboardState();
-            
+
+            // Toggle pause with H key or Options button
+            const optionsPressed = gamepad && buttonJustPressed(gamepad.buttons, 9);
+            if (keysJustPressed['KeyH'] || optionsPressed) {
+                game.paused = !game.paused;
+            }
+
+            // If paused, check for any input to resume
+            if (game.paused) {
+                // Any key/button resumes (except H which toggles)
+                if (checkRestartInput(gamepad) && !keysJustPressed['KeyH'] && !optionsPressed) {
+                    game.paused = false;
+                }
+                return;
+            }
+
+            // Handle death sequence
+            if (game.death.active) {
+                updatePlayerDeath();
+
+                // Check for restart input during wait phase (phase 0)
+                if (game.death.phase === 0 && game.death.canRestart) {
+                    if (checkRestartInput(gamepad)) {
+                        game.death.phase = 1;
+                        game.death.timer = 0;
+                    }
+                }
+
+                if (game.death.frozen) {
+                    return; // Game frozen during death
+                }
+            }
+
             // Witch time runs in real-time for the timer
             updateWitchTime(1);
-            
+
             // Perfect Clear check - if all enemies dead during witch time
             if (game.witchTime.active && !game.witchTime.circleWipe && !game.witchTime.perfectClear) {
                 const allEnemiesDead = game.enemies.every(e => e.dead || e.health <= 0);
                 if (allEnemiesDead) {
                     // Trigger Perfect Clear
                     game.witchTime.perfectClear = true;
-                    game.witchTime.perfectClearTimer = 90; // 1.5 seconds
+                    game.witchTime.perfectClearTimer = 180; // 3 seconds for wave animation
+                    game.witchTime.perfectClearWave = 0;    // Wave animation progress
                     game.screenShake = 20;
                 }
             }
-            
+
             // Handle Perfect Clear state
             if (game.witchTime.perfectClear) {
                 game.witchTime.perfectClearTimer -= 1;
-                
+                // Advance wave animation
+                if (game.witchTime.perfectClearWave !== undefined) {
+                    game.witchTime.perfectClearWave += 1;
+                }
+
                 // Everything frozen during perfect clear
                 if (game.witchTime.perfectClearTimer <= 0) {
-                    // End perfect clear - exit witch time and level up
+                    // End perfect clear - exit witch time and ALL powerups +1
                     game.witchTime.active = false;
                     game.witchTime.perfectClear = false;
                     game.witchTime.circleWipe = null;
@@ -1969,8 +2750,10 @@
                     // Restore normal zoom
                     camera.targetZoom = camera.normalZoom;
 
-                    // Auto level up!
-                    levelUp();
+                    // Perfect Clear reward: ALL powerups +1 level!
+                    ['melee', 'gun', 'dash', 'witchTime', 'regen'].forEach(type => {
+                        applyPowerUp(type);
+                    });
                 }
                 
                 // Don't update anything else during perfect clear
@@ -1979,7 +2762,7 @@
             
             // During witch time: enemies slow, player normal
             const inWitchTime = game.witchTime.active && !game.witchTime.circleWipe;
-            const enemyTime = inWitchTime ? 0.15 : 1;
+            const enemyTime = inWitchTime ? game.witchTime.enemySpeed : 1;
             const playerTime = 1; // Player always full speed
             
             if (game.screenShake > 0.5) game.screenShake *= 0.85; else game.screenShake = 0;
@@ -2029,14 +2812,57 @@
                 } else if (death.phase === 'flash') {
                     if (death.timer > 8) { death.phase = 'split'; death.timer = 0; }
                 } else if (death.phase === 'split') {
-                    death.separation += 3;
-                    if (death.timer > 15) {
+                    // Faster separation in witch time so pieces can be cut sooner
+                    death.separation += inWitchTime ? 6 : 3;
+                    if (death.timer > 6) { // Faster transition (was 15)
+                        // In witch time: suspend the pieces instead of exploding
+                        if (inWitchTime && death.size >= 12) {
+                            death.phase = 'suspended';
+                            death.timer = 0;
+                            // Store final positions of both halves
+                            const perpAngle = death.slashAngle + Math.PI / 2;
+                            death.finalSep = death.separation;
+                        } else {
+                            death.phase = 'explode'; death.timer = 0;
+                            spawnParticles(death.x, death.y, '#ff0000', 10, 6);
+                            spawnParticles(death.x, death.y, death.color, 8, 5);
+                        }
+                    }
+                } else if (death.phase === 'suspended') {
+                    // Pieces suspended in air during witch time - can be re-cut
+                    // When witch time ends, explode
+                    if (!inWitchTime) {
                         death.phase = 'explode'; death.timer = 0;
                         spawnParticles(death.x, death.y, '#ff0000', 10, 6);
                         spawnParticles(death.x, death.y, death.color, 8, 5);
                     }
+                    // Stay suspended for a very long time (8 seconds) - will be cut or witch time ends
+                    if (death.timer > 480) {
+                        death.phase = 'explode'; death.timer = 0;
+                        spawnParticles(death.x, death.y, death.color, 6, 4);
+                    }
                 } else if (death.phase === 'explode') {
                     if (death.timer > 5) return false;
+                } else if (death.phase === 'piece' || death.phase === 'half' || death.phase === 'quarter') {
+                    // Individual piece (half or quarter) floating
+                    if (death.vx !== undefined) {
+                        death.x += death.vx;
+                        death.y += death.vy;
+                        death.vx *= 0.9;
+                        death.vy *= 0.9;
+                    }
+                    // Halves last much longer so player can cut them, quarters shorter
+                    const isQuarter = death.phase === 'quarter' || death.size < 25;
+                    const maxTime = inWitchTime ? (isQuarter ? 90 : 360) : 30; // Halves: 6 sec, Quarters: 1.5 sec
+                    if (death.timer > maxTime) {
+                        spawnParticles(death.x, death.y, death.color, 6, 3);
+                        return false;
+                    }
+                    // When witch time ends, explode quickly
+                    if (!inWitchTime && death.timer > 20) {
+                        spawnParticles(death.x, death.y, death.color, 4, 2);
+                        return false;
+                    }
                 }
                 return true;
             });
@@ -2047,12 +2873,39 @@
 
             // Update slot machine
             updateSlotMachine(1);
-            
-            // Handle slot machine input - R2 (gamepad) or P (keyboard) to select
+
+            // Handle slot machine input - Dash (O/L1) to select after 1 second
             if (slotMachine.active && slotMachine.spinning) {
-                const r2Value = gamepad ? (gamepad.buttons[7]?.value || 0) : 0;
-                if (r2Value > 0.5 || keysJustPressed['KeyP']) {
+                const canSelect = slotMachine.spinTimer >= 60; // Can select after 1 second
+                const dashPressed = (gamepad && buttonJustPressed(gamepad.buttons, 4)) || keysJustPressed['KeyO'];
+                if (canSelect && dashPressed) {
                     stopSlotMachine();
+                }
+            }
+
+            // Auto weapon switch after 10 seconds if no enemies nearby
+            if (!slotMachine.active && !game.witchTime.active) {
+                // Check for nearby enemies
+                let hasNearbyEnemy = false;
+                const px = player.x, py = player.y;
+                for (const enemy of game.enemies) {
+                    if (enemy.health <= 0 || enemy.dead) continue;
+                    const dx = enemy.x - px;
+                    const dy = enemy.y - py;
+                    if (dx * dx + dy * dy < WEAPON_SWITCH_ENEMY_RANGE * WEAPON_SWITCH_ENEMY_RANGE) {
+                        hasNearbyEnemy = true;
+                        break;
+                    }
+                }
+
+                if (hasNearbyEnemy) {
+                    weaponSwitchTimer = 0; // Reset timer when enemies are nearby
+                } else {
+                    weaponSwitchTimer++;
+                    if (weaponSwitchTimer >= WEAPON_AUTO_SWITCH_TIME) {
+                        cycleWeapon();
+                        weaponSwitchTimer = 0;
+                    }
                 }
             }
 
@@ -2088,6 +2941,12 @@
             if (player.hurtTimer <= 0) player.isHurt = false;
             if (player.cantAttackTimer > 0) player.cantAttackTimer -= playerTime;
             if (player.movementPause > 0) player.movementPause -= playerTime;
+
+            // HP regeneration system
+            player.lastDamageTime += playerTime;
+            if (player.lastDamageTime >= player.regenDelay && player.health < player.maxHealth) {
+                player.health = Math.min(player.maxHealth, player.health + player.regenRate * playerTime);
+            }
             
             if (player.isKnockedBack) {
                 player.knockbackTimer -= playerTime;
@@ -2203,10 +3062,7 @@
             // Full autoaim
             updateAutoAim();
             
-            // Weapon cycle: L2 (gamepad) or L (keyboard)
-            if ((gamepad && buttonJustPressed(gamepad.buttons, 6)) || keysJustPressed['KeyL']) {
-                cycleWeapon();
-            }
+            // Weapon cycle is now automatic (no manual control)
 
             // Auto-fire (always shooting)
             if (!slotMachine.active) shoot();
@@ -2225,11 +3081,12 @@
             // Dash: L1 (gamepad) or O (keyboard)
             if ((gamepad && buttonJustPressed(gamepad.buttons, 4)) || keysJustPressed['KeyO']) dash();
 
-            // Manual Witch Time activation: R2 (gamepad) or P (keyboard) when bar is full
+            // Manual Witch Time activation: L2 or R2 (gamepad) or P (keyboard) when bar is full
             // Only if not in slot machine and witch time is ready
             if (!slotMachine.active && game.witchTimeCharge.ready && !game.witchTime.active) {
+                const l2JustPressed = gamepad && buttonJustPressed(gamepad.buttons, 6);
                 const r2JustPressed = gamepad && buttonJustPressed(gamepad.buttons, 7);
-                if (r2JustPressed || keysJustPressed['KeyP']) {
+                if (l2JustPressed || r2JustPressed || keysJustPressed['KeyP']) {
                     activateWitchTimeManual();
                 }
             }
@@ -2283,9 +3140,9 @@
 
                 enemy.isAggro = distToPlayer < enemy.aggroRange;
 
-                // Boss laser attack system
-                if (enemy.type === ENEMY_BOSS) {
-                    updateBossLaser(enemy, distToPlayer, angleToPlayer, enemyTime);
+                // Laser attack system (for ENEMY_BIG and ENEMY_BOSS)
+                if (enemy.type === ENEMY_BIG || enemy.type === ENEMY_BOSS) {
+                    updateEnemyLaser(enemy, distToPlayer, angleToPlayer, enemyTime);
                 }
 
                 if (enemy.isAggro || enemy.isCharging) {
@@ -2302,8 +3159,30 @@
                         enemy.timeInAttackRange = 0;
                     }
                     
-                    // Stop movement when charging or in attack pause
-                    if (enemy.isCharging || enemy.attackPause > 0) {
+                    // Movement during attack charging - windup/lunge system
+                    if (enemy.isCharging) {
+                        const attackConfig = enemy.type === ENEMY_BOSS ? bossAttack : enemyAttack;
+                        const chargePercent = enemy.chargeTime / attackConfig.chargeTime;
+                        const windupTime = 0.4; // First 40% is windup (back up)
+                        const lungeTime = 0.7;  // 40-70% is lunge (forward)
+                        // 70-100% is attack
+
+                        if (chargePercent < windupTime) {
+                            // Windup: back away from player
+                            const backSpeed = enemy.aggroSpeed * 1.5;
+                            enemy.vx = -Math.cos(angleToPlayer) * backSpeed;
+                            enemy.vy = -Math.sin(angleToPlayer) * backSpeed;
+                        } else if (chargePercent < lungeTime) {
+                            // Lunge: charge toward player
+                            const lungeSpeed = enemy.aggroSpeed * 3;
+                            enemy.vx = Math.cos(angleToPlayer) * lungeSpeed;
+                            enemy.vy = Math.sin(angleToPlayer) * lungeSpeed;
+                        } else {
+                            // Attack wind-down: slow/stop
+                            enemy.vx *= 0.8;
+                            enemy.vy *= 0.8;
+                        }
+                    } else if (enemy.attackPause > 0) {
                         enemy.vx = 0;
                         enemy.vy = 0;
                     } else {
@@ -2330,11 +3209,13 @@
                     const inWitchTime = game.witchTime.active && !game.witchTime.circleWipe;
                     const attackDelay = 60 + Math.random() * 60; // 1-2 seconds
                     
-                    if (!enemy.isCharging && 
-                        enemy.attackCooldown <= 0 && 
-                        distToPlayer < enemy.chargeRange && 
+                    // Don't start melee attack if charging/firing laser
+                    if (!enemy.isCharging &&
+                        enemy.attackCooldown <= 0 &&
+                        distToPlayer < enemy.chargeRange &&
                         enemy.timeInAttackRange >= attackDelay &&
-                        !inWitchTime) {
+                        !inWitchTime &&
+                        !enemy.laserCharging && !enemy.laserFiring) {
                         enemy.isCharging = true;
                         enemy.chargeTime = 0;
                         enemy.inParryWindow = false;
@@ -2398,6 +3279,13 @@
                 }
 
                 if (enemy.hit > 0) enemy.hit -= enemyTime;
+                // Decay hit bounce animation (slower for more visible effect)
+                if (enemy.hitBounce > 0) enemy.hitBounce -= 0.04;
+                // Update spawn fade-in
+                if (enemy.spawnFadeIn > 0) {
+                    enemy.spawnFadeIn -= 1 / enemy.spawnFadeDuration;
+                    if (enemy.spawnFadeIn < 0) enemy.spawnFadeIn = 0;
+                }
             });
             
             // Enemy-enemy collision
@@ -2462,6 +3350,8 @@
                         const finalDamage = inWitchTime ? bullet.damage * 2 : bullet.damage;
                         enemy.health -= finalDamage;
                         enemy.hit = 10;
+                        enemy.hitBounce = 0.5;  // Smaller bounce for gun hits
+                        enemy.hitBounceType = 'gun';
                         stunEnemy(enemy);
                         game.screenShake = 4;
                         enemy.x += Math.cos(bullet.angle) * 5;
@@ -2576,6 +3466,82 @@
         }
 
         function drawPlayer(x, y, radius, angle, color, isCharging, chargePercent, isHurt, isGrounded, witchTimeReady) {
+            // If player is dead and in cut phase, draw 4 pieces separating
+            if (game.death && game.death.active && game.death.phase <= 1) {
+                const death = game.death;
+                const separationSpeed = 1.2;
+                const separation = Math.min(death.timer * separationSpeed, 40);
+                const cutAngle1 = death.cutAngle;
+                const cutAngle2 = cutAngle1 + Math.PI * 0.5; // Second cut perpendicular
+
+                // Show second cut after cutPhase changes
+                const hasSecondCut = death.cutPhase >= 1;
+
+                // Calculate separation directions for both cuts
+                const sep1X = Math.cos(cutAngle1 + Math.PI/2) * separation;
+                const sep1Y = Math.sin(cutAngle1 + Math.PI/2) * separation;
+                const sep2X = Math.cos(cutAngle2 + Math.PI/2) * separation * (hasSecondCut ? 0.7 : 0);
+                const sep2Y = Math.sin(cutAngle2 + Math.PI/2) * separation * (hasSecondCut ? 0.7 : 0);
+
+                // Draw 4 pieces (or 2 if second cut not yet done)
+                const pieces = hasSecondCut ? 4 : 2;
+                for (let piece = 0; piece < pieces; piece++) {
+                    ctx.save();
+
+                    // Calculate offset for each piece
+                    let offsetX = 0, offsetY = 0, rotOffset = 0;
+                    if (pieces === 2) {
+                        // 2 halves from first cut
+                        const sign = piece === 0 ? 1 : -1;
+                        offsetX = sep1X * sign * 0.5;
+                        offsetY = sep1Y * sign * 0.5;
+                        rotOffset = sign * 0.15 * (separation / 40);
+                    } else {
+                        // 4 quarters from both cuts
+                        const sign1 = (piece % 2 === 0) ? 1 : -1;
+                        const sign2 = (piece < 2) ? 1 : -1;
+                        offsetX = sep1X * sign1 * 0.4 + sep2X * sign2 * 0.4;
+                        offsetY = sep1Y * sign1 * 0.4 + sep2Y * sign2 * 0.4;
+                        rotOffset = (sign1 * 0.12 + sign2 * 0.08) * (separation / 40);
+                    }
+
+                    ctx.translate(x + offsetX, y + offsetY);
+                    ctx.rotate(angle + rotOffset);
+
+                    // Clip to the appropriate section
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    const clipAngle = cutAngle1 - angle;
+                    if (pieces === 2) {
+                        // Half
+                        if (piece === 0) {
+                            ctx.arc(0, 0, radius * 2, clipAngle, clipAngle + Math.PI);
+                        } else {
+                            ctx.arc(0, 0, radius * 2, clipAngle + Math.PI, clipAngle + Math.PI * 2);
+                        }
+                    } else {
+                        // Quarter
+                        const startAngles = [0, Math.PI, Math.PI * 0.5, Math.PI * 1.5];
+                        const quarterAngle = clipAngle + startAngles[piece];
+                        ctx.arc(0, 0, radius * 2, quarterAngle, quarterAngle + Math.PI * 0.5);
+                    }
+                    ctx.closePath();
+                    ctx.clip();
+
+                    // Draw player shape (blink between red and white)
+                    const blinkPhase = Math.floor(Date.now() / 80) % 2;
+                    ctx.fillStyle = blinkPhase ? '#ff6666' : '#ffffff';
+                    ctx.beginPath();
+                    ctx.moveTo(radius * 1.3, 0);
+                    ctx.arc(0, 0, radius, -Math.PI * 0.25, Math.PI * 0.25, true);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    ctx.restore();
+                }
+                return;
+            }
+
             ctx.save();
             ctx.translate(x, y);
             ctx.rotate(angle);
@@ -2587,7 +3553,7 @@
                 ctx.fill();
                 ctx.globalAlpha = 1;
             }
-            
+
             // Determine player color
             let playerColor;
             if (isGrounded) {
@@ -2601,7 +3567,7 @@
             } else {
                 playerColor = color;
             }
-            
+
             ctx.fillStyle = playerColor;
             ctx.beginPath();
             ctx.moveTo(radius * 1.3, 0);
@@ -2782,10 +3748,13 @@
                 } else if (death.phase === 'split') {
                     const perpAngle = death.slashAngle + Math.PI / 2;
                     const sep = death.separation;
-                    drawHalfShape(death.x + Math.cos(perpAngle) * sep, death.y + Math.sin(perpAngle) * sep, 
+                    // Pieces slightly darker than live enemies but still visible
+                    ctx.globalAlpha = 0.7;
+                    drawHalfShape(death.x + Math.cos(perpAngle) * sep, death.y + Math.sin(perpAngle) * sep,
                         death.size, death.type, death.slashAngle, 1, death.color);
-                    drawHalfShape(death.x - Math.cos(perpAngle) * sep, death.y - Math.sin(perpAngle) * sep, 
+                    drawHalfShape(death.x - Math.cos(perpAngle) * sep, death.y - Math.sin(perpAngle) * sep,
                         death.size, death.type, death.slashAngle, -1, death.color);
+                    ctx.globalAlpha = 1;
                     ctx.strokeStyle = '#ffffff';
                     ctx.lineWidth = 2;
                     ctx.globalAlpha = 0.8;
@@ -2793,6 +3762,25 @@
                     ctx.moveTo(death.x + Math.cos(death.slashAngle) * death.size, death.y + Math.sin(death.slashAngle) * death.size);
                     ctx.lineTo(death.x - Math.cos(death.slashAngle) * death.size, death.y - Math.sin(death.slashAngle) * death.size);
                     ctx.stroke();
+                    ctx.globalAlpha = 1;
+                } else if (death.phase === 'suspended') {
+                    // Suspended pieces during witch time - same draw as split but static
+                    const perpAngle = death.slashAngle + Math.PI / 2;
+                    const sep = death.finalSep || death.separation;
+                    // Pieces slightly darker than live enemies but still visible
+                    ctx.globalAlpha = 0.7;
+                    drawHalfShape(death.x + Math.cos(perpAngle) * sep, death.y + Math.sin(perpAngle) * sep,
+                        death.size, death.type, death.slashAngle, 1, death.color);
+                    drawHalfShape(death.x - Math.cos(perpAngle) * sep, death.y - Math.sin(perpAngle) * sep,
+                        death.size, death.type, death.slashAngle, -1, death.color);
+                    ctx.globalAlpha = 1;
+                } else if (death.phase === 'piece' || death.phase === 'half' || death.phase === 'quarter') {
+                    // Individual piece (a single half or quarter) - draw using drawHalfShape
+                    const side = death.cutSide || 1;
+                    // Quarters darker than halves to show they're smaller pieces
+                    const isQuarter = death.phase === 'quarter' || death.size < 25;
+                    ctx.globalAlpha = isQuarter ? 0.55 : 0.7;
+                    drawHalfShape(death.x, death.y, death.size, death.type, death.slashAngle, side, death.color);
                     ctx.globalAlpha = 1;
                 }
             });
@@ -2810,11 +3798,170 @@
                 }
             });
 
+            // Draw bullets FIRST (underneath everything)
+            game.bullets.forEach(bullet => {
+                ctx.fillStyle = bullet.color;
+                ctx.beginPath();
+                ctx.arc(bullet.x, bullet.y, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = bullet.color;
+                ctx.globalAlpha = 0.5;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(bullet.x, bullet.y);
+                ctx.lineTo(bullet.x - bullet.vx * 2, bullet.y - bullet.vy * 2);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            });
+
+            // Draw lasers (underneath enemies)
+            game.enemies.forEach(enemy => {
+                if (enemy.health <= 0 || enemy.dead) return;
+                if ((enemy.type === ENEMY_BIG || enemy.type === ENEMY_BOSS) && (enemy.laserCharging || enemy.laserFiring)) {
+                    const config = getLaserConfig(enemy);
+                    const chargePercent = enemy.laserChargeTime / config.chargeTime;
+                    const isBoss = enemy.type === ENEMY_BOSS;
+
+                    const laserLength = 1500;
+                    const endX = enemy.x + Math.cos(enemy.laserAimAngle) * laserLength;
+                    const endY = enemy.y + Math.sin(enemy.laserAimAngle) * laserLength;
+
+                    // Set line caps for solid corners
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+
+                    if (enemy.laserFiring) {
+                        const blinkPhase = Math.floor(Date.now() / 50) % 2;
+                        if (isBoss) {
+                            // Outer glow - solid
+                            ctx.strokeStyle = blinkPhase ? '#ffffff' : '#ffff88';
+                            ctx.lineWidth = config.fireLineWidth + 15;
+                            ctx.beginPath();
+                            ctx.moveTo(enemy.x, enemy.y);
+                            ctx.lineTo(endX, endY);
+                            ctx.stroke();
+
+                            // Middle layer - solid
+                            ctx.strokeStyle = blinkPhase ? '#ffff00' : '#ffcc00';
+                            ctx.lineWidth = config.fireLineWidth + 6;
+                            ctx.beginPath();
+                            ctx.moveTo(enemy.x, enemy.y);
+                            ctx.lineTo(endX, endY);
+                            ctx.stroke();
+
+                            // Core - solid
+                            ctx.strokeStyle = blinkPhase ? '#ffffff' : '#ffff00';
+                            ctx.lineWidth = config.fireLineWidth;
+                            ctx.beginPath();
+                            ctx.moveTo(enemy.x, enemy.y);
+                            ctx.lineTo(endX, endY);
+                            ctx.stroke();
+                        } else {
+                            // Big enemy laser - solid
+                            ctx.strokeStyle = blinkPhase ? '#ffffff' : '#88aaff';
+                            ctx.lineWidth = config.fireLineWidth;
+                            ctx.beginPath();
+                            ctx.moveTo(enemy.x, enemy.y);
+                            ctx.lineTo(endX, endY);
+                            ctx.stroke();
+                        }
+                    } else {
+                        // Charging - solid colors
+                        if (isBoss) {
+                            const blinkSpeed = 100 + (1 - chargePercent) * 200;
+                            const blinkPhase = Math.sin(Date.now() / blinkSpeed * Math.PI);
+                            const baseColor = chargePercent < 0.7 ? '#ffcc00' : '#ff3333';
+                            ctx.strokeStyle = baseColor;
+                            ctx.lineWidth = config.lineWidth + chargePercent * 4;
+                            ctx.beginPath();
+                            ctx.moveTo(enemy.x, enemy.y);
+                            ctx.lineTo(endX, endY);
+                            ctx.stroke();
+
+                            if (Math.random() < 0.3 + chargePercent * 0.5) {
+                                const particleDist = 100 + Math.random() * 200;
+                                const particleAngle = enemy.laserAimAngle + (Math.random() - 0.5) * 0.8;
+                                const px = enemy.x + Math.cos(particleAngle) * particleDist;
+                                const py = enemy.y + Math.sin(particleAngle) * particleDist;
+                                game.particles.push({
+                                    x: px, y: py,
+                                    vx: (enemy.x - px) * 0.08,
+                                    vy: (enemy.y - py) * 0.08,
+                                    life: 15 + Math.random() * 10,
+                                    maxLife: 25,
+                                    radius: 2 + Math.random() * 2,
+                                    color: chargePercent < 0.7 ? '#ffcc00' : '#ff6644'
+                                });
+                            }
+                        } else {
+                            ctx.strokeStyle = chargePercent < 0.7 ? '#6688ff' : '#ff6688';
+                            ctx.lineWidth = config.lineWidth + chargePercent * 2;
+                            ctx.beginPath();
+                            ctx.moveTo(enemy.x, enemy.y);
+                            ctx.lineTo(endX, endY);
+                            ctx.stroke();
+                        }
+                    }
+
+                    // Reset line caps
+                    ctx.lineCap = 'butt';
+                    ctx.lineJoin = 'miter';
+                }
+            });
+
+            // Draw laser deflect visual BEFORE enemies (underneath them)
+            if (game.laserDeflect && game.laserDeflect.timer > 0) {
+                const deflect = game.laserDeflect;
+                const blinkPhase = Math.floor(Date.now() / 50) % 2;
+
+                // Colors based on enemy type (boss = yellow, big = blue)
+                const baseColor = deflect.isBoss ? '#ffff00' : '#88aaff';
+                const blinkColor = blinkPhase ? '#ffffff' : baseColor;
+                const lineWidth = deflect.isBoss ? 20 : 12;
+
+                // Set line caps for solid corners at join point
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                if (deflect.isBoss) {
+                    // Boss: outer glow - draw as single path for seamless join
+                    ctx.strokeStyle = blinkPhase ? '#ffffff' : '#ffff88';
+                    ctx.lineWidth = lineWidth + 10;
+                    ctx.beginPath();
+                    ctx.moveTo(deflect.fromX, deflect.fromY);
+                    ctx.lineTo(deflect.bounceX, deflect.bounceY);
+                    ctx.lineTo(deflect.toX, deflect.toY);
+                    ctx.stroke();
+                }
+
+                // Main laser line - single path from enemy through player to target
+                ctx.strokeStyle = blinkColor;
+                ctx.lineWidth = lineWidth;
+                ctx.beginPath();
+                ctx.moveTo(deflect.fromX, deflect.fromY);
+                ctx.lineTo(deflect.bounceX, deflect.bounceY);
+                ctx.lineTo(deflect.toX, deflect.toY);
+                ctx.stroke();
+
+                // Draw a circle at the bounce point to fill any remaining gap
+                ctx.fillStyle = blinkColor;
+                ctx.beginPath();
+                ctx.arc(deflect.bounceX, deflect.bounceY, lineWidth / 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Reset line caps
+                ctx.lineCap = 'butt';
+                ctx.lineJoin = 'miter';
+
+                deflect.timer--;
+            }
+
             // Enemies - draw all charging rings (not affected by parry state)
             game.enemies.forEach(enemy => {
                 if (enemy.health <= 0 || enemy.dead) return;
-                
-                if (enemy.isCharging) {
+
+                // Don't show melee attack ring if enemy is charging/firing laser
+                if (enemy.isCharging && !enemy.laserCharging && !enemy.laserFiring) {
                     const attackConfig = enemy.type === ENEMY_BOSS ? bossAttack : enemyAttack;
                     const chargePercent = enemy.chargeTime / attackConfig.chargeTime;
                     const maxBorderDist = 25;
@@ -2852,104 +3999,33 @@
                 }
                 
                 const drawColor = enemy.hit > 0 ? '#ffffff' : enemy.color;
-                
+
+                // Apply hit bounce scale effect
+                let bounceScale = 1;
+                if (enemy.hitBounce > 0) {
+                    // Melee: bigger squish (1.3x), Gun: smaller squish (1.15x)
+                    const maxScale = enemy.hitBounceType === 'melee' ? 1.35 : 1.18;
+                    // Bounce out then back: sin curve for smooth effect
+                    bounceScale = 1 + (maxScale - 1) * Math.sin(enemy.hitBounce * Math.PI);
+                }
+
+                ctx.save();
+                // Apply spawn fade-in opacity
+                if (enemy.spawnFadeIn > 0) {
+                    ctx.globalAlpha = 1 - enemy.spawnFadeIn;
+                }
+                ctx.translate(enemy.x, enemy.y);
+                ctx.scale(bounceScale, bounceScale);
+                ctx.translate(-enemy.x, -enemy.y);
+
                 if (enemy.type === ENEMY_NORMAL) {
                     drawCircle(enemy.x, enemy.y, enemy.size / 2, drawColor);
                 } else if (enemy.type === ENEMY_BIG) {
                     drawDiamond(enemy.x, enemy.y, enemy.size, enemy.angle, drawColor);
                 } else if (enemy.type === ENEMY_BOSS) {
                     drawPentagon(enemy.x, enemy.y, enemy.size, enemy.angle, drawColor);
-
-                    // Boss laser charging visual
-                    if (enemy.laserCharging || enemy.laserFiring) {
-                        const chargePercent = enemy.laserChargeTime / bossLaser.chargeTime;
-
-                        // Draw charging ring (same style as melee attack)
-                        if (enemy.laserCharging) {
-                            const maxBorderDist = 25;
-                            const borderDist = maxBorderDist - (chargePercent * maxBorderDist);
-
-                            // Yellow -> Red as charge completes
-                            let borderColor;
-                            if (chargePercent < 0.8) {
-                                borderColor = '#ffcc00';
-                            } else {
-                                borderColor = '#ff3333';
-                            }
-
-                            ctx.strokeStyle = borderColor;
-                            ctx.lineWidth = 2;
-                            ctx.globalAlpha = 0.6 + chargePercent * 0.3;
-                            ctx.beginPath();
-                            ctx.arc(enemy.x, enemy.y, enemy.size / 2 + borderDist, 0, Math.PI * 2);
-                            ctx.stroke();
-                            ctx.globalAlpha = 1;
-                        }
-
-                        // Draw aim line
-                        const laserLength = 1500;
-                        const endX = enemy.x + Math.cos(enemy.laserAimAngle) * laserLength;
-                        const endY = enemy.y + Math.sin(enemy.laserAimAngle) * laserLength;
-
-                        if (enemy.laserFiring) {
-                            // Firing - thick yellow line
-                            ctx.strokeStyle = '#ffff00';
-                            ctx.lineWidth = 8;
-                            ctx.globalAlpha = 0.9;
-                        } else {
-                            // Charging - thin line, yellow->red
-                            ctx.strokeStyle = chargePercent < 0.8 ? '#ffcc00' : '#ff3333';
-                            ctx.lineWidth = 2 + chargePercent * 3;
-                            ctx.globalAlpha = 0.4 + chargePercent * 0.4;
-                        }
-
-                        ctx.beginPath();
-                        ctx.moveTo(enemy.x, enemy.y);
-                        ctx.lineTo(endX, endY);
-                        ctx.stroke();
-                        ctx.globalAlpha = 1;
-                    }
                 }
-            });
-
-            // Draw laser deflect visual if active
-            if (game.laserDeflect && game.laserDeflect.timer > 0) {
-                const deflect = game.laserDeflect;
-                const alpha = deflect.timer / 30;
-
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 6;
-                ctx.globalAlpha = alpha;
-
-                // Line from boss to player
-                ctx.beginPath();
-                ctx.moveTo(deflect.fromX, deflect.fromY);
-                ctx.lineTo(deflect.bounceX, deflect.bounceY);
-                ctx.stroke();
-
-                // Line from player to target
-                ctx.strokeStyle = '#ffff00';
-                ctx.beginPath();
-                ctx.moveTo(deflect.bounceX, deflect.bounceY);
-                ctx.lineTo(deflect.toX, deflect.toY);
-                ctx.stroke();
-
-                ctx.globalAlpha = 1;
-                deflect.timer--;
-            }
-
-            game.bullets.forEach(bullet => {
-                ctx.fillStyle = bullet.color;
-                ctx.beginPath();
-                ctx.arc(bullet.x, bullet.y, 4, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.strokeStyle = bullet.color;
-                ctx.globalAlpha = 0.5;
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(bullet.x, bullet.y);
-                ctx.lineTo(bullet.x - bullet.vx * 2, bullet.y - bullet.vy * 2);
-                ctx.stroke();
+                ctx.restore();
                 ctx.globalAlpha = 1;
             });
 
@@ -2969,6 +4045,52 @@
             const hurtFlash = player.isHurt && Math.floor(player.hurtTimer / 4) % 2 === 0;
             const witchTimeReady = game.witchTimeCharge.ready;
             drawPlayer(player.x, player.y, player.radius, player.angle, player.color, showChargeVisual, visualChargePercent, hurtFlash, player.isGrounded, witchTimeReady);
+
+            // Draw targeting reticle on autoAim target
+            if (player.autoAimTarget && player.reticleAnim > 0 && isEnemyOnScreen(player.autoAimTarget)) {
+                const target = player.autoAimTarget;
+                const t = player.reticleAnim; // 0 to 1 animation progress
+
+                // Easing function for lock-in (starts fast, slows at end)
+                const ease = 1 - Math.pow(1 - t, 3);
+
+                // Radius starts large and shrinks to outside the enemy with gap
+                const targetRadius = target.size * 0.75 + 12; // Final radius - outside enemy with gap
+                const startRadius = target.size * 2.0;        // Starting radius (large)
+                const radius = startRadius + (targetRadius - startRadius) * ease;
+
+                // 4 markers rotating around target
+                const rotation = player.reticleRotation;
+
+                ctx.save();
+                ctx.globalAlpha = 0.7 + 0.3 * ease; // Fade in as it locks
+
+                for (let i = 0; i < 4; i++) {
+                    const angle = rotation + (i * Math.PI / 2); // 90 degrees apart
+                    const mx = target.x + Math.cos(angle) * radius;
+                    const my = target.y + Math.sin(angle) * radius;
+
+                    // Draw same arrow sprite as offscreen indicator, but smaller and pointing inward
+                    ctx.save();
+                    ctx.translate(mx, my);
+                    ctx.rotate(angle + Math.PI); // Point toward center
+
+                    // Same triangle shape as offscreen indicator, scaled to 50%
+                    const scale = 0.5;
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.moveTo(12 * scale, 0);           // Point (toward center)
+                    ctx.lineTo(-6 * scale, -8 * scale);  // Top back
+                    ctx.lineTo(-3 * scale, 0);           // Inner notch
+                    ctx.lineTo(-6 * scale, 8 * scale);   // Bottom back
+                    ctx.closePath();
+                    ctx.fill();
+
+                    ctx.restore();
+                }
+
+                ctx.restore();
+            }
 
             // Player parry indicator removed - using enemy rings only
 
@@ -3052,7 +4174,9 @@
                 }
             }
 
-            // Witch time timer indicator (around player) - in world space
+            // Witch time timer indicator (around player) - COMMENTED OUT for testing
+            // Use the witch time bar at top instead
+            /*
             if (game.witchTime.active && !game.witchTime.circleWipe) {
                 const wt = game.witchTime;
                 const progress = wt.timer / wt.maxTime;
@@ -3072,6 +4196,7 @@
                 ctx.arc(player.x, player.y, arcRadius, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
                 ctx.stroke();
             }
+            */
 
             // End world space rendering (camera transform)
             ctx.restore();
@@ -3105,43 +4230,95 @@
             
             const inWitchTime = game.witchTime.active && !game.witchTime.circleWipe;
             
-            // Witch Time Charge Bar (hidden during witch time, always visible otherwise)
-            if (!inWitchTime) {
+            // Witch Time Bar (shows charge when not active, shows remaining time when active)
+            {
                 const wtBarWidth = 450;  // 50% wider
                 const wtBarHeight = 12;
                 const wtBarX = (canvas.width - wtBarWidth) / 2;
                 const wtBarY = 30;
-                
+
+                // Update flash timers
+                if (game.witchTimeCharge.justFilledFlash > 0) {
+                    game.witchTimeCharge.justFilledFlash--;
+                }
+                if (game.witchTimeCharge.hitFlash > 0) {
+                    game.witchTimeCharge.hitFlash--;
+                }
+                if (game.witchTime.rechargeFlash > 0) {
+                    game.witchTime.rechargeFlash--;
+                }
+
                 // Bar background
                 ctx.fillStyle = '#1a1a2e';
                 ctx.fillRect(wtBarX - 2, wtBarY - 2, wtBarWidth + 4, wtBarHeight + 4);
                 ctx.fillStyle = '#2a2a4e';
                 ctx.fillRect(wtBarX, wtBarY, wtBarWidth, wtBarHeight);
-                
-                // Charge fill
-                const chargePercent = game.witchTimeCharge.charge / game.witchTimeCharge.maxCharge;
-                
-                // Violet/purple color (unified with witch time theme) with blinking when ready
+
                 let barColor;
-                if (game.witchTimeCharge.ready) {
-                    const blinkPhase = Math.floor(Date.now() / 100) % 2; // 10 fps blink
-                    barColor = blinkPhase === 0 ? '#ff00ff' : '#ffffff'; // Magenta/white blink
+                let fillPercent;
+
+                if (inWitchTime) {
+                    // During witch time: show remaining time (consuming)
+                    fillPercent = game.witchTime.timer / game.witchTime.maxTime;
+                    // Fast blink magenta/white when recharged, otherwise soft blink
+                    if (game.witchTime.rechargeFlash > 0) {
+                        const blinkPhase = Math.floor(Date.now() / 30) % 2;
+                        barColor = blinkPhase === 0 ? '#ff00ff' : '#ffffff';
+                    } else {
+                        const blinkPhase = Math.floor(Date.now() / 50) % 2;
+                        barColor = blinkPhase === 0 ? '#aa00ff' : '#cc66ff';
+                    }
                 } else {
-                    barColor = '#aa00ff'; // Violet when charging
+                    // Not in witch time: show charge
+                    fillPercent = game.witchTimeCharge.charge / game.witchTimeCharge.maxCharge;
+
+                    // Blink on hit, when ready, or when just filled
+                    const shouldBlink = game.witchTimeCharge.hitFlash > 0 ||
+                                       game.witchTimeCharge.ready ||
+                                       game.witchTimeCharge.justFilledFlash > 0;
+                    if (shouldBlink) {
+                        // Furious blink violet/white
+                        const blinkSpeed = (game.witchTimeCharge.justFilledFlash > 0 || game.witchTimeCharge.hitFlash > 0) ? 30 : 50;
+                        const blinkPhase = Math.floor(Date.now() / blinkSpeed) % 2;
+                        barColor = blinkPhase === 0 ? '#ff00ff' : '#ffffff';
+                    } else {
+                        barColor = '#aa00ff'; // Violet when charging
+                    }
                 }
-                
+
                 ctx.fillStyle = barColor;
-                ctx.fillRect(wtBarX, wtBarY, wtBarWidth * chargePercent, wtBarHeight);
-                
-                // Label hidden per user request
-                // ctx.fillStyle = '#ffffff';
-                // ctx.font = 'bold 12px sans-serif';
-                // ctx.textAlign = 'center';
-                // ctx.fillText('WITCH TIME', canvas.width / 2, wtBarY - 8);
+                ctx.fillRect(wtBarX, wtBarY, wtBarWidth * fillPercent, wtBarHeight);
+            }
+
+            // HP Bar (always visible, below witch time bar)
+            {
+                const hpBarWidth = 450;
+                const hpBarHeight = 8;
+                const hpBarX = (canvas.width - hpBarWidth) / 2;
+                const hpBarY = 55; // Below witch time bar
+
+                // Background
+                ctx.fillStyle = '#1a1a2e';
+                ctx.fillRect(hpBarX - 2, hpBarY - 2, hpBarWidth + 4, hpBarHeight + 4);
+                ctx.fillStyle = '#2a2a4e';
+                ctx.fillRect(hpBarX, hpBarY, hpBarWidth, hpBarHeight);
+
+                // HP fill - blink when hurt (same as player)
+                const hpPercent = game.player.health / game.player.maxHealth;
+                const isHurtBlink = game.player.isHurt && Math.floor(game.player.hurtTimer / 4) % 2 === 0;
+                ctx.fillStyle = isHurtBlink ? '#ffffff' : '#ff3333';
+                ctx.fillRect(hpBarX, hpBarY, hpBarWidth * hpPercent, hpBarHeight);
+
+                // Flash effect when low HP
+                if (hpPercent < 0.3 && !game.player.isHurt) {
+                    const flashPhase = Math.sin(Date.now() / 200) * 0.3 + 0.5;
+                    ctx.fillStyle = `rgba(255, 0, 0, ${flashPhase * 0.3})`;
+                    ctx.fillRect(hpBarX, hpBarY, hpBarWidth, hpBarHeight);
+                }
             }
             
-            // Only show XP, power-ups, and weapon during non-witch-time
-            if (!inWitchTime) {
+            // Always show XP, power-ups, and weapon (including during witch time)
+            {
                 // Reset text alignment to default before UI rendering
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'alphabetic';
@@ -3157,10 +4334,22 @@
                 ctx.fillRect(barX - 2, barY - 2, barWidth + 4, barHeight + 4);
                 ctx.fillStyle = '#2a2a4e';
                 ctx.fillRect(barX, barY, barWidth, barHeight);
-                
-                // XP fill (yellow)
+
+                // Update flash timers
+                if (xpSystem.levelUpFlash > 0) xpSystem.levelUpFlash--;
+                if (xpSystem.hitFlash > 0) xpSystem.hitFlash--;
+
+                // XP fill (yellow, furious blink on hit or level up)
                 const xpPercent = xpSystem.xp / xpSystem.xpToNext;
-                ctx.fillStyle = '#ffdd00';
+                let xpColor = '#ffdd00';
+                const shouldBlink = xpSystem.levelUpFlash > 0 || xpSystem.hitFlash > 0;
+                if (shouldBlink) {
+                    // Furious blink - very fast alternating white/yellow
+                    const blinkSpeed = xpSystem.levelUpFlash > 0 ? 30 : 40;
+                    const blinkPhase = Math.floor(Date.now() / blinkSpeed) % 2;
+                    xpColor = blinkPhase === 0 ? '#ffffff' : '#ffdd00';
+                }
+                ctx.fillStyle = xpColor;
                 ctx.fillRect(barX, barY, barWidth * xpPercent, barHeight);
                 
                 // Row above XP bar: LVL (left) | Icons (center) | Weapon (right)
@@ -3193,21 +4382,79 @@
                     const cfg = powerUpConfig[key];
                     const count = powerUps[key];
                     if (count > 0) {
+                        const flashTimer = game.powerUpFlash[key] || 0;
+                        const isFlashing = flashTimer > 0;
+                        const flashPhase = Math.floor(Date.now() / 50) % 2;
+
+                        // Update flash timer
+                        if (isFlashing) {
+                            game.powerUpFlash[key]--;
+                        }
+
+                        const iconX = iconStartX + iconOffset;
+
+                        // Spawn particles if this powerup was just acquired/leveled
+                        if (game.powerUpParticles && game.powerUpParticles[key]) {
+                            game.powerUpParticles[key] = false;
+                            // Spawn particle explosion (screen space)
+                            for (let i = 0; i < 12; i++) {
+                                const angle = (i / 12) * Math.PI * 2 + Math.random() * 0.3;
+                                const speed = 2 + Math.random() * 3;
+                                game.uiParticles.push({
+                                    x: iconX + 8,
+                                    y: iconY,
+                                    vx: Math.cos(angle) * speed,
+                                    vy: Math.sin(angle) * speed - 1,
+                                    life: 20 + Math.random() * 15,
+                                    maxLife: 35,
+                                    radius: 2 + Math.random() * 3,
+                                    color: Math.random() > 0.5 ? '#ffffff' : cfg.color
+                                });
+                            }
+                        }
+
+                        // Draw icon (no scale animation)
+                        ctx.save();
                         ctx.font = '16px sans-serif';
-                        ctx.fillStyle = cfg.color;
+                        ctx.fillStyle = isFlashing && flashPhase ? '#ffffff' : cfg.color;
+                        ctx.textAlign = 'center';
+                        ctx.fillText(cfg.icon, iconX + 8, iconY);
+                        ctx.restore();
+
+                        // Draw count number to the RIGHT of icon
+                        ctx.font = 'bold 11px sans-serif';
+                        ctx.fillStyle = isFlashing && flashPhase ? cfg.color : '#ffffff';
                         ctx.textAlign = 'left';
-                        ctx.fillText(cfg.icon, iconStartX + iconOffset, iconY);
-                        ctx.font = 'bold 12px sans-serif';
-                        ctx.fillStyle = '#ffffff';
-                        ctx.fillText(`${count}`, iconStartX + iconOffset + 20, iconY);
+                        ctx.fillText(`${count}`, iconX + 20, iconY);
+
                         iconOffset += iconSpacing;
                     }
                 });
                 
                 // Reset text align to default
                 ctx.textAlign = 'left';
+
+                // Update and draw UI particles (for powerup effects, etc)
+                game.uiParticles = game.uiParticles.filter(p => {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += 0.15; // Gravity
+                    p.life--;
+
+                    if (p.life <= 0) return false; // Remove dead particles
+
+                    const alpha = Math.max(0, p.life / p.maxLife);
+                    const radius = Math.max(0.1, p.radius * alpha);
+                    ctx.globalAlpha = alpha;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    return true;
+                });
+                ctx.globalAlpha = 1;
             }
-            
+
             // Slot Machine UI - floating next to player (in screen space)
             if (slotMachine.active) {
                 const currentOption = slotMachine.options[slotMachine.currentIndex];
@@ -3221,35 +4468,33 @@
                 // Box size
                 const boxSize = 40;
                 
+                // Emoji vertical offset correction (emojis render slightly high)
+                const emojiOffsetY = 2;
+
                 if (slotMachine.spinning) {
                     // Spinning state - show cycling icons with colored border
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
                     ctx.beginPath();
                     ctx.arc(floatX, floatY, boxSize / 2 + 5, 0, Math.PI * 2);
                     ctx.fill();
-                    
+
                     ctx.strokeStyle = cfg.color;
                     ctx.lineWidth = 3;
                     ctx.beginPath();
                     ctx.arc(floatX, floatY, boxSize / 2 + 5, 0, Math.PI * 2);
                     ctx.stroke();
-                    
-                    // Icon
+
+                    // Icon centered in circle
                     ctx.font = '24px sans-serif';
                     ctx.fillStyle = '#ffffff';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText(cfg.icon, floatX, floatY);
-                    
-                    // Small R2 hint below
-                    ctx.font = '10px sans-serif';
-                    ctx.fillStyle = '#888888';
-                    ctx.fillText('R2', floatX, floatY + boxSize / 2 + 12);
+                    ctx.fillText(cfg.icon, floatX, floatY + emojiOffsetY);
                 } else {
                     // Selected state - white blink effect
                     const blinkPhase = Math.floor(slotMachine.displayTimer / 8) % 2;
                     const isBlinking = slotMachine.displayTimer > 120; // Blink for first ~0.5s
-                    
+
                     if (isBlinking && blinkPhase === 0) {
                         // White flash
                         ctx.fillStyle = '#ffffff';
@@ -3264,25 +4509,20 @@
                         ctx.arc(floatX, floatY, boxSize / 2 + 5, 0, Math.PI * 2);
                         ctx.fill();
                         ctx.globalAlpha = 1;
-                        
+
                         ctx.strokeStyle = cfg.color;
                         ctx.lineWidth = 3;
                         ctx.beginPath();
                         ctx.arc(floatX, floatY, boxSize / 2 + 5, 0, Math.PI * 2);
                         ctx.stroke();
                     }
-                    
-                    // Icon (always visible)
+
+                    // Icon centered in circle
                     ctx.font = '24px sans-serif';
                     ctx.fillStyle = '#ffffff';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText(cfg.icon, floatX, floatY);
-                    
-                    // +1 indicator
-                    ctx.font = 'bold 14px sans-serif';
-                    ctx.fillStyle = cfg.color;
-                    ctx.fillText('+1', floatX, floatY + boxSize / 2 + 12);
+                    ctx.fillText(cfg.icon, floatX, floatY + emojiOffsetY);
                 }
                 
                 ctx.textBaseline = 'alphabetic'; // Reset
@@ -3290,52 +4530,301 @@
             
             // PERFECT CLEAR overlay
             if (game.witchTime.perfectClear) {
-                // Lighter overlay (0.7 instead of 0.85)
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                // More transparent overlay (0.5 instead of 0.7)
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-                
+
                 // Screen shake during perfect clear
                 game.screenShake = 12;
-                
-                // Spawn particles from text position (center of viewport in world coords)
-                if (Math.floor(game.witchTime.perfectClearTimer) % 3 === 0) {
-                    // Convert screen center to world coordinates
-                    const worldCenterX = camera.x;
-                    const worldCenterY = camera.y;
-                    for (let i = 0; i < 3; i++) {
-                        const angle = Math.random() * Math.PI * 2;
-                        const dist = (100 + Math.random() * 150) / camera.zoom;  // Adjust for zoom
-                        spawnParticles(worldCenterX + Math.cos(angle) * dist, worldCenterY + Math.sin(angle) * dist, '#ffffff', 3, 6);
+
+                // Calculate text dimensions for particle spawning
+                const targetWidth = canvas.width * 0.8;
+                const targetHeight = canvas.height * 0.6;
+                const fontSize = Math.min(targetWidth / 10, targetHeight / 1.5);
+                const textWidth = fontSize * 8; // Approximate width of "PERFECT CLEAR"
+                const textHeight = fontSize * 0.8;
+                const textX = canvas.width / 2;
+                const textY = canvas.height / 2 - 40; // Moved up
+
+                // Spawn UI particles from text rectangle (screen space, not world space)
+                if (Math.floor(game.witchTime.perfectClearTimer) % 2 === 0) {
+                    for (let i = 0; i < 4; i++) {
+                        // Spawn from edges of text rectangle
+                        const edge = Math.floor(Math.random() * 4);
+                        let px, py;
+                        switch(edge) {
+                            case 0: // Top
+                                px = textX + (Math.random() - 0.5) * textWidth;
+                                py = textY - textHeight / 2;
+                                break;
+                            case 1: // Bottom
+                                px = textX + (Math.random() - 0.5) * textWidth;
+                                py = textY + textHeight / 2;
+                                break;
+                            case 2: // Left
+                                px = textX - textWidth / 2;
+                                py = textY + (Math.random() - 0.5) * textHeight;
+                                break;
+                            case 3: // Right
+                                px = textX + textWidth / 2;
+                                py = textY + (Math.random() - 0.5) * textHeight;
+                                break;
+                        }
+                        game.uiParticles.push({
+                            x: px,
+                            y: py,
+                            vx: (Math.random() - 0.5) * 8,
+                            vy: (Math.random() - 0.5) * 8 - 2, // Slight upward bias
+                            life: 30 + Math.random() * 20,
+                            maxLife: 50,
+                            radius: 3 + Math.random() * 4,
+                            color: Math.random() > 0.5 ? '#ffffff' : '#ff00ff'
+                        });
                     }
                 }
-                
+
+                // Draw UI particles (on top of overlay)
+                game.uiParticles.forEach((p, i) => {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += 0.1; // Slight gravity
+                    p.life--;
+
+                    const alpha = Math.max(0, p.life / p.maxLife);
+                    const radius = Math.max(0.1, p.radius * alpha);
+                    ctx.globalAlpha = alpha;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                ctx.globalAlpha = 1;
+
+                // Remove dead particles
+                game.uiParticles = game.uiParticles.filter(p => p.life > 0 && p.maxLife > 0);
+
                 // Blinking effect - same as enemy hit (white/color alternating every 4 frames)
                 const blinkPhase = Math.floor(game.witchTime.perfectClearTimer / 4) % 2;
-                
+
                 // PERFECT CLEAR text - always visible but color changes
                 ctx.save();
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                
+
                 // Alternate between white and magenta (like enemy hit flash)
                 const textColor = blinkPhase === 0 ? '#ffffff' : '#ff00ff';
-                
-                // Single line text - sized to 80% width, 60% height
-                // Calculate font size based on canvas dimensions
-                const targetWidth = canvas.width * 0.8;
-                const targetHeight = canvas.height * 0.6;
-                // Start with large font and adjust
-                const fontSize = Math.min(targetWidth / 10, targetHeight / 1.5);
-                
+
                 ctx.font = `bold ${fontSize}px Impact, sans-serif`;
                 ctx.fillStyle = textColor;
-                ctx.fillText('PERFECT CLEAR', canvas.width / 2, canvas.height / 2);
-                
+                ctx.fillText('PERFECT CLEAR', textX, textY);
+
                 ctx.restore();
+
+                // Wave animation showing ALL powerups rising
+                const waveProgress = game.witchTime.perfectClearWave || 0;
+                const powerUpTypes = ['melee', 'gun', 'dash', 'witchTime', 'regen'];
+                const waveSpacing = 30; // Frames between each powerup starting to animate
+                const waveDuration = 60; // How long each powerup animation lasts
+
+                powerUpTypes.forEach((type, i) => {
+                    const cfg = powerUpConfig[type];
+                    const startTime = i * waveSpacing;
+                    const localProgress = (waveProgress - startTime) / waveDuration;
+
+                    if (localProgress > 0 && localProgress < 1.5) {
+                        // Position: spread across bottom, rise up then settle
+                        const baseX = canvas.width / 2 + (i - 2) * 80;
+                        const startY = canvas.height + 50;
+                        const targetY = canvas.height / 2 + 60; // More space from text (text is at /2 - 40)
+
+                        // Ease out bounce
+                        let yProgress = Math.min(1, localProgress);
+                        const easeY = 1 - Math.pow(1 - yProgress, 3); // Cubic ease out
+                        const bounceY = yProgress > 0.7 ? Math.sin((yProgress - 0.7) * 10) * 5 * (1.5 - localProgress) : 0;
+
+                        const y = startY + (targetY - startY) * easeY + bounceY;
+                        const scale = 0.5 + easeY * 1.0; // Start small, grow to 1.5x
+                        const alpha = Math.min(1, localProgress * 2) * Math.min(1, (1.5 - localProgress) * 2);
+
+                        ctx.save();
+                        ctx.globalAlpha = alpha;
+                        ctx.translate(baseX, y);
+                        ctx.scale(scale, scale);
+
+                        // Icon (no circle background)
+                        ctx.font = 'bold 48px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillText(cfg.icon, 0, 0);
+
+                        // +1 text
+                        ctx.font = 'bold 18px sans-serif';
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillText('+1', 0, 32);
+
+                        ctx.restore();
+                    }
+                });
             }
 
             // End screen shake transform
             ctx.restore();
+
+            // DEATH SEQUENCE OVERLAY - simplified
+            if (game.death.active) {
+                const death = game.death;
+
+                // Black overlay
+                ctx.fillStyle = `rgba(0, 0, 0, ${death.fadeAlpha})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Only show text in phase 0 (waiting for restart)
+                if (death.phase === 0) {
+                    // Screen shake like PERFECT CLEAR
+                    if (death.textShakeTimer > 0) {
+                        game.screenShake = 12;
+                    }
+
+                    const fontSize = Math.min(canvas.width * 0.1, 80);
+                    const textX = canvas.width / 2;
+                    const textY = canvas.height / 2 - 30;
+
+                    // YOU DIED text
+                    ctx.save();
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.font = `bold ${fontSize}px Impact, sans-serif`;
+
+                    // Blinking only during shake
+                    if (death.textShakeTimer > 0) {
+                        const blinkPhase = Math.floor(Date.now() / 80) % 2;
+                        ctx.fillStyle = blinkPhase ? '#ff0000' : '#ffffff';
+                    } else {
+                        ctx.fillStyle = '#ffffff';
+                    }
+
+                    ctx.fillText('YOU DIED', textX, textY);
+                    ctx.restore();
+
+                    // "Press anything to restart" text
+                    if (death.canRestart) {
+                        ctx.save();
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.font = 'bold 20px sans-serif';
+
+                        // Pulsing alpha
+                        const pulse = Math.sin(Date.now() / 300) * 0.3 + 0.7;
+                        ctx.fillStyle = `rgba(255, 255, 255, ${pulse})`;
+                        ctx.fillText('Press anything to restart', canvas.width / 2, textY + 80);
+                        ctx.restore();
+                    }
+                }
+            }
+
+            // PAUSE SCREEN OVERLAY
+            if (game.paused) {
+                // Dark overlay
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.save();
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                // Title
+                ctx.font = 'bold 48px Impact, sans-serif';
+                ctx.fillStyle = '#ff00ff';
+                ctx.fillText('PAUSED', canvas.width / 2, 60);
+
+                // Controls section - 3 column layout
+                const leftColX = canvas.width / 2 - 200;  // Keyboard column (right-aligned keys)
+                const centerColX = canvas.width / 2;       // Action column (centered)
+                const rightColX = canvas.width / 2 + 200;  // Gamepad column (left-aligned)
+                let y = 120;
+                const lineHeight = 28;
+
+                ctx.font = 'bold 20px sans-serif';
+                ctx.fillStyle = '#4ecca3';
+                // Headers centered over their columns
+                ctx.textAlign = 'right';
+                ctx.fillText('KEYBOARD', leftColX + 80, y);
+                ctx.textAlign = 'left';
+                ctx.fillText('GAMEPAD (PS5)', rightColX - 80, y);
+                y += lineHeight + 10;
+
+                ctx.font = '16px sans-serif';
+                ctx.fillStyle = '#ffffff';
+
+                // Order: Move, Melee, Dash, W. Time, Aim, Shoot, Change Weapon, Pause
+                const controls = [
+                    ['WASD', 'Move', 'Left Stick'],
+                    ['K', 'Melee', 'R1'],
+                    ['O', 'Dash', 'L1'],
+                    ['P (or dodge)', 'W. Time', 'L2 or R2 (or dodge)'],
+                    ['(auto)', 'Aim', '(auto)'],
+                    ['(auto)', 'Shoot', '(auto)'],
+                    ['(auto)', 'Change Weapon', '(auto)'],
+                    ['H', 'Pause / Help', 'Options']
+                ];
+
+                controls.forEach(([keyboard, action, gamepad]) => {
+                    ctx.textAlign = 'right';
+                    ctx.fillStyle = '#88ffcc';
+                    ctx.fillText(keyboard, leftColX + 80, y);
+                    ctx.textAlign = 'center';
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(action, centerColX, y);
+                    ctx.textAlign = 'left';
+                    ctx.fillStyle = '#88ffcc';
+                    ctx.fillText(gamepad, rightColX - 80, y);
+                    y += lineHeight;
+                });
+
+                // Power-ups section
+                y += 20;
+                ctx.font = 'bold 20px sans-serif';
+                ctx.fillStyle = '#ff00ff';
+                ctx.textAlign = 'center';
+                ctx.fillText('POWER-UPS', canvas.width / 2, y);
+                y += lineHeight + 5;
+
+                ctx.font = '15px sans-serif';
+                const powerUpInfo = [
+                    ['🗡️', 'MELEE', 'Damage + Sword Range'],
+                    ['🔫', 'GUN', 'Damage + Fire Rate'],
+                    ['💨', 'DASH', 'Speed + Distance'],
+                    ['⏱️', 'W. TIME', 'Duration + Enemy Slowdown'],
+                    ['❤️', 'REGEN', 'HP Regen + Charge Speed']
+                ];
+
+                // Power-ups with text next to icons (left-aligned group)
+                const powerUpStartX = canvas.width / 2 - 180;
+                powerUpInfo.forEach(([icon, name, desc]) => {
+                    ctx.textAlign = 'left';
+                    ctx.font = '20px sans-serif';
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(icon, powerUpStartX, y);
+                    ctx.font = 'bold 15px sans-serif';
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(name, powerUpStartX + 35, y);
+                    ctx.font = '14px sans-serif';
+                    ctx.fillStyle = '#aaaaaa';
+                    ctx.fillText(desc, powerUpStartX + 110, y);
+                    y += lineHeight;
+                });
+
+                // Press anything to resume
+                y += 20;
+                ctx.font = 'bold 18px sans-serif';
+                const pulse = Math.sin(Date.now() / 300) * 0.3 + 0.7;
+                ctx.fillStyle = `rgba(255, 255, 255, ${pulse})`;
+                ctx.textAlign = 'center';
+                ctx.fillText('Press anything to resume', canvas.width / 2, y);
+
+                ctx.restore();
+            }
         }
 
         function gameLoop() {
