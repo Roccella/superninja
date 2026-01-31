@@ -256,6 +256,10 @@
             hitFreeze: 0,
             screenShake: 0,
             prevButtons: {},
+            buttonsJustPressed: {},
+            buttonsJustReleased: {},
+            buttonsPressedThisFrame: {},
+            buttonsReleasedThisFrame: {},
             maxEnemies: 30,
             bossSpawnTimer: 0,
             bossSpawnInterval: 1800,
@@ -2688,10 +2692,10 @@
         }
 
         function buttonJustPressed(buttons, index) {
-            return (buttons[index]?.pressed || false) && !(game.prevButtons[index] || false);
+            return game.buttonsJustPressed[index] || false;
         }
         function buttonJustReleased(buttons, index) {
-            return !(buttons[index]?.pressed || false) && (game.prevButtons[index] || false);
+            return game.buttonsJustReleased[index] || false;
         }
 
         function enemyAttackPlayer(enemy) {
@@ -3145,12 +3149,6 @@
                 if (l2JustPressed || r2JustPressed || keysJustPressed['KeyP']) {
                     activateWitchTimeManual();
                 }
-            }
-
-            // Update gamepad button state
-            if (gamepad) {
-                game.prevButtons = {};
-                gamepad.buttons.forEach((btn, i) => { game.prevButtons[i] = btn.pressed; });
             }
 
             game.enemies.forEach(enemy => {
@@ -4887,11 +4885,40 @@
             const gamepads = navigator.getGamepads();
             let activeGamepad = null;
             for (const gp of gamepads) { if (gp && gp.connected) { activeGamepad = gp; break; } }
+
+            // Copy accumulated button events (like keyboard does)
+            game.buttonsJustPressed = {...game.buttonsPressedThisFrame};
+            game.buttonsJustReleased = {...game.buttonsReleasedThisFrame};
+            // Clear for next frame
+            game.buttonsPressedThisFrame = {};
+            game.buttonsReleasedThisFrame = {};
+
             update(activeGamepad); // Always update, gamepad can be null
             updateCamera(); // Update camera position (Hotline Miami style deadzone)
             render();
             requestAnimationFrame(gameLoop);
         }
+
+        // High-frequency gamepad polling (faster than 60fps) to catch quick taps
+        setInterval(() => {
+            const gamepads = navigator.getGamepads();
+            let gp = null;
+            for (const g of gamepads) { if (g && g.connected) { gp = g; break; } }
+
+            if (gp) {
+                gp.buttons.forEach((btn, i) => {
+                    const isPressed = btn.pressed || btn.value > 0.5;
+                    const wasPressed = game.prevButtons[i] || false;
+
+                    // Accumulate presses/releases
+                    if (isPressed && !wasPressed) game.buttonsPressedThisFrame[i] = true;
+                    if (!isPressed && wasPressed) game.buttonsReleasedThisFrame[i] = true;
+
+                    // Update prevButtons immediately for next poll
+                    game.prevButtons[i] = isPressed;
+                });
+            }
+        }, 0); // Poll as fast as possible (browser will cap at ~1ms / 1000Hz)
 
         window.addEventListener('gamepadconnected', (e) => console.log('Gamepad connected:', e.gamepad.id));
         window.addEventListener('gamepaddisconnected', (e) => console.log('Gamepad disconnected'));
