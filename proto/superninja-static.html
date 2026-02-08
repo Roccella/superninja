@@ -255,11 +255,8 @@
             lastShot: 0,
             hitFreeze: 0,
             screenShake: 0,
-            prevButtons: {},
-            buttonsJustPressed: {},
-            buttonsJustReleased: {},
-            buttonsPressedThisFrame: {},
-            buttonsReleasedThisFrame: {},
+
+
             maxEnemies: 30,
             bossSpawnTimer: 0,
             bossSpawnInterval: 1800,
@@ -1601,20 +1598,8 @@
             game.death.frozen = false;
         }
 
-        function checkRestartInput(gamepad) {
-            // Check keyboard
-            if (Object.values(keysJustPressed).some(v => v)) {
-                return true;
-            }
-            // Check gamepad
-            if (gamepad) {
-                for (let i = 0; i < gamepad.buttons.length; i++) {
-                    if (buttonJustPressed(gamepad.buttons, i)) {
-                        return true;
-                    }
-                }
-            }
-            return false;
+        function checkRestartInput() {
+            return Object.values(keysJustPressed).some(v => v);
         }
 
         function checkThrustHit(enemy, playerX, playerY, attackAngle, attackLength, attackWidth, attackOffset, damage, knockback) {
@@ -1844,7 +1829,7 @@
             spawnDust(player.x, player.y, player.dashAngle);
         }
 
-        // Manual witch time activation (P key / R2 when charged)
+        // Manual witch time activation (P key when charged)
         function activateWitchTimeManual() {
             const player = game.player;
 
@@ -2691,12 +2676,8 @@
             addGhostTrail();
         }
 
-        function buttonJustPressed(buttons, index) {
-            return game.buttonsJustPressed[index] || false;
-        }
-        function buttonJustReleased(buttons, index) {
-            return game.buttonsJustReleased[index] || false;
-        }
+
+
 
         function enemyAttackPlayer(enemy) {
             const player = game.player;
@@ -2725,20 +2706,19 @@
             enemy.attackPause = attackConfig.attackPauseDuration;
         }
 
-        function update(gamepad) {
+        function update() {
             // Update keyboard state at start of frame
             updateKeyboardState();
 
-            // Toggle pause with H key or Options button
-            const optionsPressed = gamepad && buttonJustPressed(gamepad.buttons, 9);
-            if (keysJustPressed['KeyH'] || optionsPressed) {
+            // Toggle pause with H key
+            if (keysJustPressed['KeyH']) {
                 game.paused = !game.paused;
             }
 
             // If paused, check for any input to resume
             if (game.paused) {
-                // Any key/button resumes (except H which toggles)
-                if (checkRestartInput(gamepad) && !keysJustPressed['KeyH'] && !optionsPressed) {
+                // Any key resumes (except H which toggles)
+                if (checkRestartInput() && !keysJustPressed['KeyH']) {
                     game.paused = false;
                 }
                 return;
@@ -2750,7 +2730,7 @@
 
                 // Check for restart input during wait phase (phase 0)
                 if (game.death.phase === 0 && game.death.canRestart) {
-                    if (checkRestartInput(gamepad)) {
+                    if (checkRestartInput()) {
                         game.death.phase = 1;
                         game.death.timer = 0;
                     }
@@ -2926,10 +2906,10 @@
             // Update slot machine
             updateSlotMachine(1);
 
-            // Handle slot machine input - Dash (O/L1) to select after 1 second
+            // Handle slot machine input - Dash (O) to select after 1 second
             if (slotMachine.active && slotMachine.spinning) {
                 const canSelect = slotMachine.spinTimer >= 60; // Can select after 1 second
-                const dashPressed = (gamepad && buttonJustPressed(gamepad.buttons, 4)) || keysJustPressed['KeyO'];
+                const dashPressed = keysJustPressed['KeyO'];
                 if (canSelect && dashPressed) {
                     stopSlotMachine();
                 }
@@ -3020,13 +3000,8 @@
                 if (player.groundedTimer <= 0) player.isGrounded = false;
             }
 
-            // Movement input - gamepad or keyboard
+            // Movement input - keyboard WASD
             let moveX = 0, moveY = 0;
-            if (gamepad) {
-                moveX = Math.abs(gamepad.axes[0]) > 0.15 ? gamepad.axes[0] : 0;
-                moveY = Math.abs(gamepad.axes[1]) > 0.15 ? gamepad.axes[1] : 0;
-            }
-            // Keyboard WASD overrides if pressed
             let kbX = 0, kbY = 0;
             if (keys['KeyW'] || keys['ArrowUp']) kbY -= 1;
             if (keys['KeyS'] || keys['ArrowDown']) kbY += 1;
@@ -3127,9 +3102,9 @@
             // Auto-fire (always shooting)
             if (!slotMachine.active) shoot();
 
-            // Melee: R1 (gamepad) or K (keyboard) - only charge attacks, no thrusts
-            const r1Pressed = (gamepad && gamepad.buttons[5]?.pressed) || keys['KeyK'];
-            const r1JustReleased = (gamepad && buttonJustReleased(gamepad.buttons, 5)) || keysJustReleased['KeyK'];
+            // Melee: K key - only charge attacks, no thrusts
+            const r1Pressed = keys['KeyK'];
+            const r1JustReleased = keysJustReleased['KeyK'];
 
             if (player.cantAttackTimer <= 0 && !player.isParrying && !player.isKnockedBack && !player.isGrounded) {
                 if (r1Pressed && !player.isDashing) {
@@ -3138,15 +3113,12 @@
             }
             if (r1JustReleased) releaseMelee();
 
-            // Dash: L1 (gamepad) or O (keyboard)
-            if ((gamepad && buttonJustPressed(gamepad.buttons, 4)) || keysJustPressed['KeyO']) dash();
+            // Dash: O key
+            if (keysJustPressed['KeyO']) dash();
 
-            // Manual Witch Time activation: L2 or R2 (gamepad) or P (keyboard) when bar is full
-            // Only if not in slot machine and witch time is ready
+            // Manual Witch Time activation: P key when bar is full
             if (!slotMachine.active && game.witchTimeCharge.ready && !game.witchTime.active) {
-                const l2JustPressed = gamepad && buttonJustPressed(gamepad.buttons, 6);
-                const r2JustPressed = gamepad && buttonJustPressed(gamepad.buttons, 7);
-                if (l2JustPressed || r2JustPressed || keysJustPressed['KeyP']) {
+                if (keysJustPressed['KeyP']) {
                     activateWitchTimeManual();
                 }
             }
@@ -4792,47 +4764,38 @@
                 ctx.fillStyle = '#ff00ff';
                 ctx.fillText('PAUSED', canvas.width / 2, 60);
 
-                // Controls section - 3 column layout
-                const leftColX = canvas.width / 2 - 200;  // Keyboard column (right-aligned keys)
-                const centerColX = canvas.width / 2;       // Action column (centered)
-                const rightColX = canvas.width / 2 + 200;  // Gamepad column (left-aligned)
+                // Controls section - 2 column layout
+                const leftColX = canvas.width / 2 - 15;
+                const rightColX = canvas.width / 2 + 15;
                 let y = 120;
                 const lineHeight = 28;
 
                 ctx.font = 'bold 20px sans-serif';
                 ctx.fillStyle = '#4ecca3';
-                // Headers centered over their columns
-                ctx.textAlign = 'right';
-                ctx.fillText('KEYBOARD', leftColX + 80, y);
-                ctx.textAlign = 'left';
-                ctx.fillText('GAMEPAD (PS5)', rightColX - 80, y);
+                ctx.textAlign = 'center';
+                ctx.fillText('CONTROLS', canvas.width / 2, y);
                 y += lineHeight + 10;
 
                 ctx.font = '16px sans-serif';
-                ctx.fillStyle = '#ffffff';
 
-                // Order: Move, Melee, Dash, W. Time, Aim, Shoot, Change Weapon, Pause
                 const controls = [
-                    ['WASD', 'Move', 'Left Stick'],
-                    ['K', 'Melee', 'R1'],
-                    ['O', 'Dash', 'L1'],
-                    ['P (or dodge)', 'W. Time', 'L2 or R2 (or dodge)'],
-                    ['(auto)', 'Aim', '(auto)'],
-                    ['(auto)', 'Shoot', '(auto)'],
-                    ['(auto)', 'Change Weapon', '(auto)'],
-                    ['H', 'Pause / Help', 'Options']
+                    ['WASD', 'Move'],
+                    ['K', 'Melee'],
+                    ['O', 'Dash'],
+                    ['P (or dodge)', 'W. Time'],
+                    ['(auto)', 'Aim'],
+                    ['(auto)', 'Shoot'],
+                    ['(auto)', 'Change Weapon'],
+                    ['H', 'Pause / Help']
                 ];
 
-                controls.forEach(([keyboard, action, gamepad]) => {
+                controls.forEach(([key, action]) => {
                     ctx.textAlign = 'right';
                     ctx.fillStyle = '#88ffcc';
-                    ctx.fillText(keyboard, leftColX + 80, y);
-                    ctx.textAlign = 'center';
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillText(action, centerColX, y);
+                    ctx.fillText(key, leftColX, y);
                     ctx.textAlign = 'left';
-                    ctx.fillStyle = '#88ffcc';
-                    ctx.fillText(gamepad, rightColX - 80, y);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(action, rightColX, y);
                     y += lineHeight;
                 });
 
@@ -4882,46 +4845,11 @@
         }
 
         function gameLoop() {
-            const gamepads = navigator.getGamepads();
-            let activeGamepad = null;
-            for (const gp of gamepads) { if (gp && gp.connected) { activeGamepad = gp; break; } }
-
-            // Copy accumulated button events (like keyboard does)
-            game.buttonsJustPressed = {...game.buttonsPressedThisFrame};
-            game.buttonsJustReleased = {...game.buttonsReleasedThisFrame};
-            // Clear for next frame
-            game.buttonsPressedThisFrame = {};
-            game.buttonsReleasedThisFrame = {};
-
-            update(activeGamepad); // Always update, gamepad can be null
-            updateCamera(); // Update camera position (Hotline Miami style deadzone)
+            update();
+            updateCamera();
             render();
             requestAnimationFrame(gameLoop);
         }
-
-        // High-frequency gamepad polling (faster than 60fps) to catch quick taps
-        setInterval(() => {
-            const gamepads = navigator.getGamepads();
-            let gp = null;
-            for (const g of gamepads) { if (g && g.connected) { gp = g; break; } }
-
-            if (gp) {
-                gp.buttons.forEach((btn, i) => {
-                    const isPressed = btn.pressed || btn.value > 0.5;
-                    const wasPressed = game.prevButtons[i] || false;
-
-                    // Accumulate presses/releases
-                    if (isPressed && !wasPressed) game.buttonsPressedThisFrame[i] = true;
-                    if (!isPressed && wasPressed) game.buttonsReleasedThisFrame[i] = true;
-
-                    // Update prevButtons immediately for next poll
-                    game.prevButtons[i] = isPressed;
-                });
-            }
-        }, 0); // Poll as fast as possible (browser will cap at ~1ms / 1000Hz)
-
-        window.addEventListener('gamepadconnected', (e) => console.log('Gamepad connected:', e.gamepad.id));
-        window.addEventListener('gamepaddisconnected', (e) => console.log('Gamepad disconnected'));
 
         resizeCanvas();
         // Initialize player at center of game area
