@@ -112,6 +112,8 @@
                     touchInput.moveX = 0;
                     touchInput.moveY = 0;
                 }
+            } else if (performance.now() < touchState.moveGraceUntil) {
+                // Grace period: keep last movement direction (don't jerk to stop)
             } else {
                 touchInput.moveX = 0;
                 touchInput.moveY = 0;
@@ -123,12 +125,14 @@
             moveId: null,
             moveOrigin: { x: 0, y: 0 },
             moveCurrent: { x: 0, y: 0 },
+            moveLastUpTime: 0,
+            moveLastUpPos: { x: 0, y: 0 },
+            moveGraceUntil: 0,
             attackId: null,
             attackOrigin: { x: 0, y: 0 },
             attackCurrent: { x: 0, y: 0 },
             attackStartTime: 0,
-            attackSwipeDone: false,
-            moveLastUpTime: 0
+            attackSwipeDone: false
         };
 
         const touchInput = {
@@ -154,6 +158,7 @@
         const SWIPE_THRESHOLD = 55;
         const PAUSE_BTN_SIZE = 44;
         const DOUBLE_TAP_WINDOW = 300; // ms
+        const MOVE_GRACE_MS = 150; // Grace period when move finger lifts
 
         function isPauseButton(x, y) {
             return x >= VIEWPORT_WIDTH - PAUSE_BTN_SIZE - 10 && x <= VIEWPORT_WIDTH - 10
@@ -162,6 +167,7 @@
 
         canvas.addEventListener('touchstart', e => {
             e.preventDefault();
+            const now = performance.now();
             for (const touch of e.changedTouches) {
                 touchFrameEvents.anyJustPressed = true;
 
@@ -171,12 +177,17 @@
                     continue;
                 }
 
+                const moveInGrace = touchState.moveId === null && now < touchState.moveGraceUntil;
+
                 if (touchState.moveId === null) {
-                    // Double-tap detection on movement finger → Witch Time
-                    const now = performance.now();
+                    // Double-tap detection: only if finger returned near same spot
                     if (touchState.moveLastUpTime > 0 && now - touchState.moveLastUpTime < DOUBLE_TAP_WINDOW) {
-                        touchFrameEvents.witchTimeJustPressed = true;
-                        touchState.moveLastUpTime = 0; // Consume
+                        const dx = touch.clientX - touchState.moveLastUpPos.x;
+                        const dy = touch.clientY - touchState.moveLastUpPos.y;
+                        if (Math.sqrt(dx * dx + dy * dy) < 40) {
+                            touchFrameEvents.witchTimeJustPressed = true;
+                        }
+                        touchState.moveLastUpTime = 0;
                     }
 
                     touchState.moveId = touch.identifier;
@@ -184,13 +195,25 @@
                     touchState.moveOrigin.y = touch.clientY;
                     touchState.moveCurrent.x = touch.clientX;
                     touchState.moveCurrent.y = touch.clientY;
+                    touchState.moveGraceUntil = 0; // Consumed
+                } else if (moveInGrace) {
+                    // Move slot in grace — this touch goes to attack, not move
+                    if (touchState.attackId === null) {
+                        touchState.attackId = touch.identifier;
+                        touchState.attackOrigin.x = touch.clientX;
+                        touchState.attackOrigin.y = touch.clientY;
+                        touchState.attackCurrent.x = touch.clientX;
+                        touchState.attackCurrent.y = touch.clientY;
+                        touchState.attackStartTime = now;
+                        touchState.attackSwipeDone = false;
+                    }
                 } else if (touchState.attackId === null) {
                     touchState.attackId = touch.identifier;
                     touchState.attackOrigin.x = touch.clientX;
                     touchState.attackOrigin.y = touch.clientY;
                     touchState.attackCurrent.x = touch.clientX;
                     touchState.attackCurrent.y = touch.clientY;
-                    touchState.attackStartTime = performance.now();
+                    touchState.attackStartTime = now;
                     touchState.attackSwipeDone = false;
                 }
             }
@@ -224,10 +247,14 @@
 
         canvas.addEventListener('touchend', e => {
             e.preventDefault();
+            const now = performance.now();
             for (const touch of e.changedTouches) {
                 if (touch.identifier === touchState.moveId) {
                     touchState.moveId = null;
-                    touchState.moveLastUpTime = performance.now();
+                    touchState.moveLastUpTime = now;
+                    touchState.moveLastUpPos.x = touchState.moveCurrent.x;
+                    touchState.moveLastUpPos.y = touchState.moveCurrent.y;
+                    touchState.moveGraceUntil = now + MOVE_GRACE_MS;
                 } else if (touch.identifier === touchState.attackId) {
                     touchFrameEvents.attackJustReleased = true;
                     touchState.attackId = null;
@@ -238,8 +265,14 @@
 
         canvas.addEventListener('touchcancel', e => {
             for (const touch of e.changedTouches) {
-                if (touch.identifier === touchState.moveId) touchState.moveId = null;
-                else if (touch.identifier === touchState.attackId) { touchState.attackId = null; touchState.attackSwipeDone = false; }
+                if (touch.identifier === touchState.moveId) {
+                    touchState.moveId = null;
+                    touchState.moveGraceUntil = performance.now() + MOVE_GRACE_MS;
+                } else if (touch.identifier === touchState.attackId) {
+                    touchFrameEvents.attackJustReleased = true;
+                    touchState.attackId = null;
+                    touchState.attackSwipeDone = false;
+                }
             }
         }, { passive: false });
 
@@ -3286,6 +3319,11 @@
                     // Tap landed entirely during cooldown — buffer it
                     game.meleeBuffer = true;
                 }
+            }
+
+            // Safety: if charging but no attack input, force release (touchcancel edge case)
+            if (player.isChargingMelee && !r1Pressed && !r1JustReleased) {
+                releaseMelee();
             }
 
             // Fire buffered melee as soon as cooldown expires
