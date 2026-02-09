@@ -2,9 +2,9 @@
 
 ## Overview
 Single-file HTML5 Canvas top-down action game with Bayonetta-style Witch Time.
-Gamepad (PS5) + keyboard. All code in one file: `proto/superninja-static.html` (v51).
+Keyboard only. All code in one file: `proto/superninja-static.html` (v51).
 
-**Inspirations**: Bayonetta (Witch Time), Hotline Miami (camera), Crimsonland (top-down shooter)
+**Inspirations**: Bayonetta (Witch Time), Hotline Miami (camera), Crimsonland (top-down shooter), Mario Kart (power-ups)
 
 ## File Structure
 - `proto/superninja-static.html` — current version (v51)
@@ -13,7 +13,7 @@ Gamepad (PS5) + keyboard. All code in one file: `proto/superninja-static.html` (
 
 ## Architecture
 - Game state in `game` object
-- Game loop: `gameLoop()` → `update(gamepad)` → `render()`
+- Game loop: `gameLoop()` → `update()` → `render()`
 - No external dependencies, pure Canvas 2D
 - Single HTML with inline CSS + JS, all assets drawn procedurally
 
@@ -24,16 +24,17 @@ Gamepad (PS5) + keyboard. All code in one file: `proto/superninja-static.html` (
 - **Zoom**: 1.2x normal, 1.0x during Witch Time
 - **Out-of-bounds**: Dark (#0a0a14) with green border (#4ecca3)
 
-## Core Mechanics
-
-### Player
-- **Movement**: WASD / Left Stick. Base speed 3.5
-- **Melee**: K / R1 — Hold to charge (max 42 frames). Combo system: every 3rd hit is a Combo Finisher (violet, 1.5x damage, can deflect lasers)
-- **Dash**: O / L1 — Quick dodge, invincible during dash. Base: speed 18, duration 24 frames
-- **Witch Time**: P / L2/R2 — Activates when charge bar full, or parry (dodge near charging enemy)
+## Controls
+- **Move**: WASD. Base speed 3.5
+- **Melee**: K — Hold to charge (max 42 frames). Combo: every 3rd hit = Combo Finisher (violet, 1.5x damage, deflects lasers)
+- **Dash**: O — Quick dodge, invincible. Base: speed 18, duration 24 frames
+- **Witch Time**: P — Activates when charge bar full. Also: parry (dodge near charging enemy)
 - **Shooting**: Auto-fire at visible enemies, independent aim from melee direction
 - **Weapons**: SMG / Shotgun, auto-switches every 10s when enemies nearby
+- **Pause**: H
 - **HP**: 100, regenerates 0.25/frame after 1.5s no damage
+
+## Core Mechanics
 
 ### Witch Time System
 - Charge fills by melee hits (5% per hit, 100 max)
@@ -88,7 +89,7 @@ Gamepad (PS5) + keyboard. All code in one file: `proto/superninja-static.html` (
 - Enemies killed by WT activation → halves directly in 'suspended' (ready to cut)
 
 ### Power-Up System (Slot Machine)
-On level up, slot machine with 5 options (Dash/L1 to select after 1s, auto at 3s):
+On level up, slot machine with 5 options (Dash to select after 1s, auto at 3s):
 1. **MELEE** (🗡️): Damage + Range
 2. **GUN** (🔫): Damage + Fire Rate
 3. **DASH** (💨): Speed + Distance
@@ -119,12 +120,6 @@ On level up, slot machine with 5 options (Dash/L1 to select after 1s, auto at 3s
 
 ## Technical Details
 
-### Gamepad System
-- High-frequency polling: `setInterval` at 0ms (~1000Hz) independent from game loop (60Hz)
-- Accumulates events in `buttonsPressedThisFrame`/`buttonsReleasedThisFrame`
-- Game loop copies to `buttonsJustPressed`/`buttonsJustReleased` — matches keyboard responsiveness
-- Handles analog triggers: `btn.pressed || btn.value > 0.5`
-
 ### Key Game Objects
 - `game.player`: Player state (includes `lastMeleeWasCharged`, `meleeComboCount`, `comboResetTimer`, `reticleAnim`, `reticleRotation`)
 - `game.enemies`: Enemy array (with `spawnFadeIn`, `hitBounce`, `laserCharging/laserFiring`)
@@ -139,16 +134,3 @@ On level up, slot machine with 5 options (Dash/L1 to select after 1s, auto at 3s
 - During expanding: `game.witchTime.circleWipe.expanding = true`
 - `inWitchTime` is `false` during wipe (for enemy slowdown)
 - Pieces use separate check including expanding wipe to stay alive
-
-## Controls Summary
-
-| Action | Keyboard | Gamepad (PS5) |
-|--------|----------|---------------|
-| Move | WASD | Left Stick |
-| Melee | K (hold charge) | R1 |
-| Dash | O | L1 |
-| Witch Time | P / dodge | L2/R2 / dodge |
-| Aim | auto | auto |
-| Shoot | auto | auto |
-| Weapon | auto | auto |
-| Pause | H | Options |
